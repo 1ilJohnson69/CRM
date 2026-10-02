@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeft, CalendarPlus, CreditCard, FileDown, KeyRound, MessageCircle, Pencil, Phone, RefreshCw, Smartphone, Snowflake, Sun, XCircle, Mail,
+  ArrowLeft, CalendarClock, CalendarPlus, CreditCard, FileDown, KeyRound, MessageCircle, Pencil, Phone, RefreshCw, Smartphone, Snowflake, Sun, XCircle, Contact,
 } from 'lucide-react';
 import { api, ApiError, openPdf, type Paged } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
@@ -11,9 +11,11 @@ import { date, dateTime, daysLabel, money, relative } from '../../lib/format';
 import { Alert, Avatar, Button, Card, Dialog, Empty, Field, Method, Skeleton, StatusBadge, Tabs } from '../../components/ui';
 import { useActions } from '../actions';
 import { CredentialsCard } from './MemberForm';
+import { channelIcon, CHANNEL_LABEL, CompleteFollowUpDialog, OUTCOME_LABEL } from '../crm/common';
+import { FollowUpRow } from '../crm/FollowUpsPage';
 
-type Tab = 'overview' | 'membership' | 'payments' | 'invoices' | 'app' | 'activity';
-const PLANNED = ['Attendance', 'PT', 'Workout', 'Nutrition', 'Assessments', 'Appointments', 'Communication'];
+type Tab = 'overview' | 'membership' | 'payments' | 'invoices' | 'followups' | 'communication' | 'app' | 'activity';
+const PLANNED = ['Attendance', 'PT', 'Workout', 'Nutrition', 'Assessments', 'Appointments'];
 
 function MembershipActionDialog({ kind, membership, onClose }: { kind: 'freeze' | 'extend' | 'cancel'; membership: any; onClose: () => void }) {
   const qc = useQueryClient();
@@ -80,6 +82,7 @@ function Overview({ m, onTab }: { m: any; onTab: (t: Tab) => void }) {
           <dt>Emergency</dt><dd>{m.emergency_contact_name ? `${m.emergency_contact_name} · ${m.emergency_contact_phone ?? ''}` : '—'}</dd>
           <dt>Assigned staff</dt><dd>{m.assigned_staff ?? '—'}</dd>
           <dt>Source</dt><dd>{m.source ?? '—'}</dd>
+          {m.lead_origin && <><dt>Came in as lead</dt><dd><Link to={`/leads?lead=${m.lead_origin.id}`} style={{ textDecoration: 'underline' }}>{m.lead_origin.source_name ?? 'Lead'} · {date(m.lead_origin.created_at)}</Link>{m.lead_origin.referred_by_name ? <> · referred by <Link to={`/members/${m.lead_origin.referred_by_member_id}`} style={{ textDecoration: 'underline' }}>{m.lead_origin.referred_by_name}</Link></> : null} · converted by {m.lead_origin.assigned_name ?? '—'}</dd></>}
           {m.notes && <><dt>Notes</dt><dd>{m.notes}</dd></>}
         </dl>
       </Card>
@@ -253,6 +256,45 @@ function ActivityTab({ m }: { m: any }) {
   );
 }
 
+function FollowUpsTab({ m }: { m: any }) {
+  const { can } = useAuth();
+  const actions = useActions();
+  const [completing, setCompleting] = useState<any>(null);
+  const { data } = useQuery({ queryKey: ['follow-ups', { memberId: m.id }], queryFn: () => api.get<Paged<any>>('/follow-ups', { memberId: m.id, pageSize: 100 }) });
+  return (
+    <Card title="Follow-ups" icon={<CalendarClock />} actions={can('followups.manage') && <Button size="sm" icon={<CalendarPlus />} onClick={() => actions.followUp({ memberId: m.id, name: m.full_name })}>Schedule</Button>}>
+      {!data ? <Skeleton h={160} /> : !data.data.length ? <Empty title="No follow-ups yet">Renewal follow-ups are created automatically 7 days before expiry.</Empty> : (
+        <div className="stack" style={{ gap: 6 }}>{data.data.map((f) => (
+          <FollowUpRow key={f.id} f={{ ...f, subject_name: m.full_name }} onComplete={can('followups.manage') ? () => setCompleting({ ...f, subject_name: m.full_name }) : undefined} />
+        ))}</div>
+      )}
+      {completing && <CompleteFollowUpDialog followUp={completing} onClose={() => setCompleting(null)} />}
+    </Card>
+  );
+}
+
+function CommunicationTab({ m }: { m: any }) {
+  const { can } = useAuth();
+  const actions = useActions();
+  const { data } = useQuery({ queryKey: ['communications', { memberId: m.id }], queryFn: () => api.get<Paged<any>>('/communications', { memberId: m.id, pageSize: 100 }), enabled: can('communications.log') });
+  return (
+    <Card title="Communication" icon={<Contact />} actions={can('communications.log') && <Button size="sm" variant="primary" icon={<MessageCircle />} onClick={() => actions.contact({ memberId: m.id, name: m.full_name })}>Contact</Button>}>
+      {!can('communications.log') ? <Empty title="You don't have access to communication logs" /> : !data ? <Skeleton h={160} /> : !data.data.length ? <Empty title="No communication yet" /> : (
+        <div className="feed">{data.data.map((c) => (
+          <div className="feed-item" key={c.id}>
+            <div className="ic">{channelIcon(c.channel)}</div>
+            <div>
+              <div className="txt"><b>{CHANNEL_LABEL[c.channel]}</b>{c.template_name ? ` · ${c.template_name}` : ''}{c.outcome ? ` · ${OUTCOME_LABEL[c.outcome] ?? c.outcome}` : ''}</div>
+              {c.body && <div className="muted" style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{c.body}</div>}
+              <div className="when">{dateTime(c.created_at)} · {c.logged_by_name}</div>
+            </div>
+          </div>
+        ))}</div>
+      )}
+    </Card>
+  );
+}
+
 export function MemberProfile() {
   const { id } = useParams();
   const { can } = useAuth();
@@ -277,9 +319,9 @@ export function MemberProfile() {
               {can('memberships.manage') && <Button size="sm" icon={<RefreshCw />} onClick={() => actions.sellMembership({ memberId: m.id, memberName: m.full_name, planId: cm?.plan_id })}>{cm && cm.status !== 'none' ? 'Renew' : 'Sell membership'}</Button>}
               {can('memberships.manage') && cm?.status === 'active' && <Button size="sm" icon={<Snowflake />} onClick={() => setTab('membership')}>Freeze</Button>}
               {can('members.write') && <Button size="sm" icon={<Pencil />} onClick={() => actions.editMember(m)}>Edit</Button>}
+              {can('communications.log') && <Button size="sm" icon={<MessageCircle />} onClick={() => actions.contact({ memberId: m.id, name: m.full_name, defaultTemplate: cm?.status === 'expired' ? 'membership_expired' : cm?.status === 'expiring_soon' ? 'renewal_reminder' : undefined })}>Contact</Button>}
               {m.phone && <a className="btn sm" href={`tel:${m.phone}`}><Phone />Call</a>}
-              {m.phone && <a className="btn sm" href={`https://wa.me/${m.phone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer"><MessageCircle />WhatsApp</a>}
-              {m.email && <a className="btn sm hide-sm" href={`mailto:${m.email}`}><Mail />Email</a>}
+              {can('followups.manage') && <Button size="sm" icon={<CalendarClock />} onClick={() => actions.followUp({ memberId: m.id, name: m.full_name })}>Follow-up</Button>}
             </div>
           </div>
           <div className="facts">
@@ -291,12 +333,15 @@ export function MemberProfile() {
       </section>
       <Tabs<Tab> value={tab} onChange={setTab} tabs={[
         { key: 'overview', label: 'Overview' }, { key: 'membership', label: 'Membership' }, { key: 'payments', label: 'Payments' },
-        { key: 'invoices', label: 'Invoices' }, { key: 'app', label: 'App account' }, { key: 'activity', label: 'Activity' },
+        { key: 'invoices', label: 'Invoices' }, { key: 'followups', label: 'Follow-ups' }, { key: 'communication', label: 'Communication' },
+        { key: 'app', label: 'App account' }, { key: 'activity', label: 'Activity' },
       ]} />
       {tab === 'overview' && <Overview m={m} onTab={setTab} />}
       {tab === 'membership' && <MembershipTab m={m} />}
       {tab === 'payments' && <PaymentsTab m={m} />}
       {tab === 'invoices' && <InvoicesTab m={m} />}
+      {tab === 'followups' && <FollowUpsTab m={m} />}
+      {tab === 'communication' && <CommunicationTab m={m} />}
       {tab === 'app' && <AppTab m={m} />}
       {tab === 'activity' && <ActivityTab m={m} />}
     </div>

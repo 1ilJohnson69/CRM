@@ -13,7 +13,7 @@ commonRouter.get('/search', requireStaff, async (req, res) => {
   const like = `%${q}%`;
   const ctx = auth(req);
   const has = (p: string) => ctx.permissions.has(p);
-  const [members, invoices, payments, staff] = await Promise.all([
+  const [members, invoices, payments, staff, leads] = await Promise.all([
     has('members.read')
       ? query(
           `SELECT m.id, u.full_name AS title, concat_ws(' · ', m.member_code, u.phone) AS subtitle, cm.status
@@ -51,8 +51,18 @@ commonRouter.get('/search', requireStaff, async (req, res) => {
           [ctx.orgId, like],
         )
       : [],
+    has('leads.read')
+      ? query(
+          `SELECT l.id, l.full_name AS title, concat_ws(' · ', l.phone, initcap(replace(l.stage, '_', ' '))) AS subtitle, l.stage
+             FROM leads l
+            WHERE l.organization_id = $1 AND l.branch_id = ANY($2) AND l.stage <> 'won'
+              AND (l.full_name ILIKE $3 OR l.phone ILIKE $3 OR l.email ILIKE $3)
+            ORDER BY l.created_at DESC LIMIT 4`,
+          [ctx.orgId, ctx.branchIds, like],
+        )
+      : [],
   ]);
-  res.json({ members, invoices, payments, staff });
+  res.json({ members, leads, invoices, payments, staff });
 });
 
 // --------------------------------------------------------- notifications ----

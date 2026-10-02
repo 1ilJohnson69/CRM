@@ -15,6 +15,9 @@ import { dashboardRouter } from './modules/dashboard/routes.js';
 import { adminRouter } from './modules/admin/routes.js';
 import { commonRouter } from './modules/common/routes.js';
 import { appRouter } from './modules/app/routes.js';
+import { leadsRouter } from './modules/crm/leads.js';
+import { communicationsRouter, followUpsRouter, templatesRouter } from './modules/crm/engagement.js';
+import { segmentsRouter } from './modules/crm/segments.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -39,6 +42,11 @@ staff.use('/payments', paymentsRouter);
 staff.use('/invoices', invoicesRouter);
 staff.use('/dashboard', dashboardRouter);
 staff.use('/admin', adminRouter);
+staff.use('/leads', leadsRouter);
+staff.use('/follow-ups', followUpsRouter);
+staff.use('/communications', communicationsRouter);
+staff.use('/templates', templatesRouter);
+staff.use('/segments', segmentsRouter);
 staff.use('/', commonRouter);
 app.use('/api', staff);
 

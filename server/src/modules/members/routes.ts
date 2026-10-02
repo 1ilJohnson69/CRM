@@ -2,11 +2,11 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { one, query, tx } from '../../db/pool.js';
 import { assertBranch, auth, branchScope, can, hashPassword, temporaryPassword } from '../../lib/auth.js';
+import { createMember, memberCreateSchema, profileFields } from './service.js';
+import { compileRules, segmentRules } from '../crm/segments.js';
 import { audit } from '../../lib/audit.js';
 import { badRequest, notFound } from '../../lib/errors.js';
-import { isoDate, paginationSchema, paged, uuid } from '../../lib/http.js';
-import { nextSequence, PAYMENT_METHODS } from '../billing/service.js';
-import { sellMembership } from '../memberships/service.js';
+import { paginationSchema, paged, uuid } from '../../lib/http.js';
 
 export const membersRouter = Router();
 
@@ -17,6 +17,7 @@ const listSchema = paginationSchema.extend({
   status: z.enum(STATUSES).optional(),
   sort: z.enum(['name', 'joined', 'expiry']).default('joined'),
   outstanding: z.coerce.boolean().optional(),
+  segmentId: uuid.optional(),
 });
 
 membersRouter.get('/', can('members.read'), async (req, res) => {
@@ -32,6 +33,11 @@ membersRouter.get('/', can('members.read'), async (req, res) => {
     where.push(`cm.status = $${params.length}`);
   }
   if (q.outstanding) where.push(`bal.outstanding > 0`);
+  if (q.segmentId) {
+    const seg = await one(`SELECT rules FROM segments WHERE id = $1 AND organization_id = $2`, [q.segmentId, auth(req).orgId]);
+    if (!seg) throw notFound('Segment');
+    where.push(...compileRules(segmentRules.parse(seg.rules), params));
+  }
   const order = { name: 'u.full_name ASC', joined: 'm.join_date DESC, m.created_at DESC', expiry: 'cm.end_date ASC NULLS LAST' }[q.sort];
   params.push(q.pageSize, (q.page - 1) * q.pageSize);
 
@@ -54,90 +60,9 @@ membersRouter.get('/', can('members.read'), async (req, res) => {
   res.json(paged(rows, q.page, q.pageSize));
 });
 
-const profileFields = {
-  fullName: z.string().trim().min(2),
-  email: z.string().trim().email().toLowerCase().optional().nullable(),
-  phone: z
-    .string()
-    .trim()
-    .transform((v) => v.replace(/[\s-]/g, ''))
-    .pipe(z.string().regex(/^\+?\d{10,13}$/, 'Enter a valid phone number')),
-  dateOfBirth: isoDate.optional().nullable(),
-  gender: z.enum(['male', 'female', 'other']).optional().nullable(),
-  address: z.string().trim().optional().nullable(),
-  emergencyContactName: z.string().trim().optional().nullable(),
-  emergencyContactPhone: z.string().trim().optional().nullable(),
-  source: z.string().trim().optional().nullable(),
-  notes: z.string().trim().optional().nullable(),
-  assignedStaffId: uuid.optional().nullable(),
-};
-
-const createSchema = z.object({
-  ...profileFields,
-  branchId: uuid,
-  joinDate: isoDate.optional(),
-  issueAppAccess: z.boolean().default(true),
-  membership: z
-    .object({
-      planId: uuid,
-      startDate: isoDate.optional(),
-      discount: z.coerce.number().min(0).default(0),
-      payment: z
-        .object({
-          amount: z.coerce.number().positive(),
-          method: z.enum(PAYMENT_METHODS),
-          reference: z.string().trim().optional().nullable(),
-        })
-        .optional()
-        .nullable(),
-    })
-    .optional()
-    .nullable(),
-});
-
 membersRouter.post('/', can('members.write'), async (req, res) => {
-  const body = createSchema.parse(req.body);
-  assertBranch(req, body.branchId);
-  if (body.membership && !auth(req).permissions.has('memberships.manage')) throw badRequest('You cannot sell memberships');
-  if (body.membership?.payment && !auth(req).permissions.has('payments.create')) throw badRequest('You cannot record payments');
-
-  const result = await tx(async (c) => {
-    const orgId = auth(req).orgId;
-    const tempPassword = body.issueAppAccess ? temporaryPassword() : null;
-    const user = await one(
-      `INSERT INTO users (organization_id, kind, full_name, email, phone, password_hash, must_change_password)
-       VALUES ($1,'member',$2,$3,$4,$5,true) RETURNING id`,
-      [orgId, body.fullName, body.email ?? null, body.phone, tempPassword ? await hashPassword(tempPassword) : null],
-      c,
-    );
-    const seq = await nextSequence(c, orgId, 'member');
-    const memberCode = `M${String(10000 + seq)}`;
-    const member = await one(
-      `INSERT INTO members (user_id, organization_id, branch_id, member_code, date_of_birth, gender, address,
-                            emergency_contact_name, emergency_contact_phone, join_date, source, notes, assigned_staff_id)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,COALESCE($10::date, current_date),$11,$12,$13) RETURNING *`,
-      [user!.id, orgId, body.branchId, memberCode, body.dateOfBirth ?? null, body.gender ?? null, body.address ?? null,
-        body.emergencyContactName ?? null, body.emergencyContactPhone ?? null, body.joinDate ?? null, body.source ?? null,
-        body.notes ?? null, body.assignedStaffId ?? null],
-      c,
-    );
-    await audit(c, req, {
-      action: 'member.created',
-      entityType: 'member',
-      entityId: member.id,
-      branchId: body.branchId,
-      summary: `New member ${body.fullName} (${memberCode}) registered`,
-      after: { member_code: memberCode, phone: body.phone, email: body.email, app_access: body.issueAppAccess },
-    });
-    let sale = null;
-    if (body.membership) sale = await sellMembership(c, req, member.id, { ...body.membership, kind: 'new' });
-    return {
-      member,
-      sale,
-      credentials: tempPassword ? { login: body.email ?? body.phone, temporaryPassword: tempPassword } : null,
-    };
-  });
-  res.status(201).json(result);
+  const body = memberCreateSchema.parse(req.body);
+  res.status(201).json(await tx((c) => createMember(c, req, body)));
 });
 
 async function loadMember(req: Parameters<typeof auth>[0], id: string) {
@@ -157,7 +82,7 @@ async function loadMember(req: Parameters<typeof auth>[0], id: string) {
 membersRouter.get('/:id', can('members.read'), async (req, res) => {
   const id = uuid.parse(req.params.id);
   const member = await loadMember(req, id);
-  const [current, balance, stats, sessions] = await Promise.all([
+  const [current, balance, stats, sessions, origin] = await Promise.all([
     one(`SELECT * FROM member_current_membership WHERE member_id = $1`, [id]),
     one(`SELECT * FROM member_balances WHERE member_id = $1`, [id]),
     one(
@@ -171,8 +96,16 @@ membersRouter.get('/:id', can('members.read'), async (req, res) => {
         WHERE user_id = $1 AND revoked_at IS NULL AND expires_at > now() ORDER BY last_used_at DESC LIMIT 5`,
       [member.user_id],
     ),
+    one(
+      `SELECT l.id, l.created_at, l.converted_at, s.name AS source_name, u.full_name AS assigned_name,
+              ru.full_name AS referred_by_name, l.referred_by_member_id
+         FROM leads l LEFT JOIN lead_sources s ON s.id = l.source_id LEFT JOIN users u ON u.id = l.assigned_to
+         LEFT JOIN members rm ON rm.id = l.referred_by_member_id LEFT JOIN users ru ON ru.id = rm.user_id
+        WHERE l.converted_member_id = $1 ORDER BY l.converted_at DESC LIMIT 1`,
+      [id],
+    ),
   ]);
-  res.json({ ...member, current_membership: current, balance, stats, app_sessions: sessions });
+  res.json({ ...member, current_membership: current, balance, stats, app_sessions: sessions, lead_origin: origin ?? null });
 });
 
 membersRouter.patch('/:id', can('members.write'), async (req, res) => {

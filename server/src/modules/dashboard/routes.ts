@@ -10,7 +10,7 @@ const pct = (now: number, before: number) => (before ? Math.round(((now - before
 dashboardRouter.get('/summary', can('dashboard.view'), async (req, res) => {
   const scope = [auth(req).orgId, branchScope(req)];
 
-  const [active, activeSeries, revenue, revenueSeries, joins, joinSeries, renewals, outstanding] = await Promise.all([
+  const [active, activeSeries, revenue, revenueSeries, joins, joinSeries, renewals, outstanding, leads, leadSeries] = await Promise.all([
     one(
       `SELECT count(*) FILTER (WHERE cm.status IN ('active','expiring_soon')) AS active,
               count(*) FILTER (WHERE cm.status = 'frozen') AS frozen
@@ -70,6 +70,21 @@ dashboardRouter.get('/summary', can('dashboard.view'), async (req, res) => {
          FROM invoices WHERE organization_id = $1 AND branch_id = ANY($2) AND status IN ('pending','partially_paid')`,
       scope,
     ),
+    one(
+      `SELECT count(*) FILTER (WHERE created_at >= date_trunc('month', current_date)) AS this_month,
+              count(*) FILTER (WHERE created_at >= date_trunc('month', current_date) - interval '1 month'
+                                 AND created_at < now() - interval '1 month') AS last_month_to_date,
+              count(*) FILTER (WHERE stage = 'won' AND converted_at >= current_date - 89) AS won_90,
+              count(*) FILTER (WHERE stage = 'lost' AND stage_changed_at >= current_date - 89) AS lost_90
+         FROM leads WHERE organization_id = $1 AND branch_id = ANY($2)`,
+      scope,
+    ),
+    query(
+      `SELECT d::date AS date, (SELECT count(*) FROM leads l WHERE l.organization_id = $1 AND l.branch_id = ANY($2)
+                                  AND l.created_at >= d - interval '6 days' AND l.created_at < d + interval '1 day') AS value
+         FROM generate_series(current_date - 56, current_date, interval '7 days') d ORDER BY d`,
+      scope,
+    ),
   ]);
 
   const activeValues = activeSeries.map((r) => Number(r.value));
@@ -91,6 +106,14 @@ dashboardRouter.get('/summary', can('dashboard.view'), async (req, res) => {
       value: Number(joins!.this_month),
       change: pct(Number(joins!.this_month), Number(joins!.last_month_to_date)),
       series: joinSeries.map((r) => Number(r.value)),
+    },
+    newLeads: {
+      value: Number(leads!.this_month),
+      change: pct(Number(leads!.this_month), Number(leads!.last_month_to_date)),
+      conversionRate: Number(leads!.won_90) + Number(leads!.lost_90)
+        ? Math.round((Number(leads!.won_90) / (Number(leads!.won_90) + Number(leads!.lost_90))) * 1000) / 10
+        : 0,
+      series: leadSeries.map((r) => Number(r.value)),
     },
     renewalsDue: { value: Number(renewals!.week), today: Number(renewals!.today), atStake: renewals!.week_value },
     outstanding: { value: outstanding!.amount, invoices: Number(outstanding!.invoices) },
@@ -211,4 +234,53 @@ dashboardRouter.get('/staff', can('dashboard.view'), async (req, res) => {
     [auth(req).orgId, branchScope(req)],
   );
   res.json(rows);
+});
+
+dashboardRouter.get('/pipeline', can('dashboard.view', 'leads.read'), async (req, res) => {
+  const scope = [auth(req).orgId, branchScope(req)];
+  const [stages, sources, flow] = await Promise.all([
+    query(
+      `SELECT l.stage, count(*) AS count, COALESCE(sum(COALESCE(l.expected_value, p.price)), 0) AS value
+         FROM leads l LEFT JOIN membership_plans p ON p.id = l.interested_plan_id
+        WHERE l.organization_id = $1 AND l.branch_id = ANY($2)
+          AND (l.stage NOT IN ('won','lost') OR l.stage_changed_at >= current_date - 29)
+        GROUP BY l.stage`,
+      scope,
+    ),
+    query(
+      `SELECT COALESCE(s.name, 'Unknown') AS source, count(*) AS leads, count(*) FILTER (WHERE l.stage = 'won') AS won
+         FROM leads l LEFT JOIN lead_sources s ON s.id = l.source_id
+        WHERE l.organization_id = $1 AND l.branch_id = ANY($2) AND l.created_at >= current_date - 89
+        GROUP BY 1 ORDER BY leads DESC LIMIT 6`,
+      scope,
+    ),
+    // Of leads created in the last 90 days: how far did each get? Trials are a
+    // side path (many win without one), so they're reported separately.
+    one(
+      `SELECT count(*) AS leads,
+              count(*) FILTER (WHERE x.stages && ARRAY['contacted','interested','trial_booked','trial_completed','negotiation','won']) AS contacted,
+              count(*) FILTER (WHERE x.stages && ARRAY['interested','trial_booked','trial_completed','negotiation','won']) AS engaged,
+              count(*) FILTER (WHERE x.stages && ARRAY['trial_booked','trial_completed']) AS trials,
+              count(*) FILTER (WHERE x.stages && ARRAY['trial_booked','trial_completed'] AND x.stage = 'won') AS trials_won,
+              count(*) FILTER (WHERE x.stage = 'won') AS won
+         FROM (SELECT l.id, l.stage, array_agg(h.to_stage) AS stages FROM leads l JOIN lead_stage_history h ON h.lead_id = l.id
+                WHERE l.organization_id = $1 AND l.branch_id = ANY($2) AND l.created_at >= current_date - 89 GROUP BY l.id) x`,
+      scope,
+    ),
+  ]);
+  const order = ['new', 'contacted', 'interested', 'trial_booked', 'trial_completed', 'negotiation', 'won', 'lost'];
+  const by = Object.fromEntries(stages.map((s) => [s.stage, s]));
+  const f = Object.fromEntries(Object.entries(flow!).map(([k, v]) => [k, Number(v)]));
+  const funnel = [
+    { stage: 'leads', label: 'Leads', reached: f.leads },
+    { stage: 'contacted', label: 'Contacted', reached: f.contacted },
+    { stage: 'engaged', label: 'Interested', reached: f.engaged },
+    { stage: 'won', label: 'Converted', reached: f.won },
+  ];
+  res.json({
+    stages: order.map((stage) => ({ stage, count: Number(by[stage]?.count ?? 0), value: Number(by[stage]?.value ?? 0) })),
+    funnel,
+    trials: { booked: f.trials, won: f.trials_won },
+    sources: sources.map((s) => ({ source: s.source, leads: Number(s.leads), won: Number(s.won) })),
+  });
 });

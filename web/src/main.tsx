@@ -16,6 +16,10 @@ import { InvoiceDetail, InvoicesPage, PaymentsPage } from './features/billing/Bi
 import { AuditPage, BranchesPage, EmployeesPage, RolesPage, SettingsPage } from './features/admin/AdminPages';
 import { AccountPage, LoginPage, NotFoundPage, PlannedPage } from './features/auth/AuthPages';
 import { Empty } from './components/ui';
+import { LeadsPage } from './features/crm/LeadsPage';
+import { FollowUpsPage } from './features/crm/FollowUpsPage';
+import { SegmentDetail, SegmentsPage } from './features/crm/SegmentsPage';
+import { CommunicationPage } from './features/crm/CommunicationPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,6 +48,11 @@ function App() {
         <Route index element={can('dashboard.view') ? <Dashboard /> : <Navigate to="/members" replace />} />
         <Route path="members" element={<Guard perm="members.read"><MembersList /></Guard>} />
         <Route path="members/:id" element={<Guard perm="members.read"><MemberProfile /></Guard>} />
+        <Route path="leads" element={<Guard perm="leads.read"><LeadsPage /></Guard>} />
+        <Route path="follow-ups" element={<Guard perm="followups.manage"><FollowUpsPage /></Guard>} />
+        <Route path="segments" element={<Guard perm="members.read"><SegmentsPage /></Guard>} />
+        <Route path="segments/:id" element={<Guard perm="members.read"><SegmentDetail /></Guard>} />
+        <Route path="communication" element={<Guard perm="communications.log"><CommunicationPage /></Guard>} />
         <Route path="memberships" element={<Guard perm="plans.read"><MembershipsPage /></Guard>} />
         <Route path="payments" element={<Guard perm="payments.read"><PaymentsPage /></Guard>} />
         <Route path="invoices" element={<Guard perm="invoices.read"><InvoicesPage /></Guard>} />

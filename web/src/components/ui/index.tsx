@@ -161,18 +161,33 @@ export function Segmented<T extends string | number>({ options, value, onChange 
 
 // ---------------------------------------------------------- modal / drawer --
 
-function useEscape(onClose: () => void) {
+// Stacked dialogs (a contact modal over a lead drawer): Escape closes only the top one.
+const escapeStack: symbol[] = [];
+function useEscape(onClose: () => void, active = true) {
+  const latest = useRef(onClose);
+  latest.current = onClose;
   useEffect(() => {
-    const h = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    if (!active) return;
+    const id = Symbol();
+    escapeStack.push(id);
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && escapeStack.at(-1) === id) {
+        e.stopPropagation();
+        latest.current();
+      }
+    };
     window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
+    return () => {
+      window.removeEventListener('keydown', h);
+      escapeStack.splice(escapeStack.indexOf(id), 1);
+    };
+  }, [active]);
 }
 
 export function Dialog({ open, onClose, title, sub, children, footer, variant = 'modal', wide }: {
   open: boolean; onClose: () => void; title: ReactNode; sub?: ReactNode; children: ReactNode; footer?: ReactNode; variant?: 'modal' | 'drawer'; wide?: boolean;
 }) {
-  useEscape(onClose);
+  useEscape(onClose, open);
   if (!open) return null;
   return createPortal(
     <>
@@ -212,7 +227,7 @@ export function Popover({ trigger, children, align = 'right', width }: { trigger
     document.addEventListener('mousedown', h);
     return () => document.removeEventListener('mousedown', h);
   }, [open]);
-  useEscape(() => setOpen(false));
+  useEscape(() => setOpen(false), open);
   return (
     <div ref={ref} style={{ position: 'relative' }}>
       {trigger(open, () => setOpen((o) => !o))}

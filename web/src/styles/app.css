@@ -314,6 +314,7 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size
 @keyframes fade { from { opacity: 0; } }
 .modal { position: fixed; z-index: 81; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 48px); display: flex; flex-direction: column; background: var(--surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-pop); animation: modal-in 0.22s var(--ease); }
 .modal.wide { width: min(760px, calc(100vw - 32px)); }
+.drawer.wide { width: min(720px, 100vw); }
 @keyframes modal-in { from { opacity: 0; transform: translate(-50%, -48%) scale(0.98); } }
 .drawer { position: fixed; z-index: 81; top: 0; right: 0; bottom: 0; width: min(560px, 100vw); display: flex; flex-direction: column; background: var(--surface); box-shadow: var(--shadow-pop); animation: drawer-in 0.26s var(--ease); }
 @keyframes drawer-in { from { transform: translateX(24px); opacity: 0; } }
@@ -507,4 +508,62 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* ------------------------------------------------------- phase 2: crm -- */
+
+.stage-pip { width: 8px; height: 8px; border-radius: 99px; display: inline-block; flex-shrink: 0; }
+.kpi.selected { border-color: var(--accent-ring); background: linear-gradient(140deg, var(--accent-soft), var(--surface) 70%); }
+
+.board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(250px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 8px; align-items: start; scrollbar-width: thin; }
+.board-col { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); display: flex; flex-direction: column; max-height: calc(100vh - 250px); min-height: 220px; transition: border-color 0.15s, background 0.15s; }
+.board-col.over { border-color: var(--accent-ring); background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.board-col.won.over { border-color: var(--success); }
+.board-col header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); position: sticky; top: 0; }
+.board-col header b { font-size: 13px; }
+.board-list { padding: 10px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1; scrollbar-width: thin; }
+.board-empty { border: 1px dashed var(--border-strong); border-radius: 12px; padding: 18px; text-align: center; color: var(--text-3); font-size: 12.5px; }
+.lead-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 11px 12px; cursor: grab; transition: transform 0.12s var(--ease), border-color 0.12s, box-shadow 0.12s; }
+.lead-card:hover { border-color: var(--border-strong); transform: translateY(-1px); box-shadow: var(--shadow); }
+.lead-card:active { cursor: grabbing; }
+.lead-card.dragging { opacity: 0.35; }
+.lead-card .lc-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lead-card .lc-meta { font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.lead-card .lc-value { font-weight: 800; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--accent); white-space: nowrap; }
+.lead-card .badge { max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+.drop-marker { height: 3px; border-radius: 3px; background: var(--gold-grad); margin: 2px 0; }
+
+.stage-track { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+.stage-track .st { height: 30px; border: 0; border-radius: 6px; background: var(--surface-3); color: var(--text-3); font-size: 11px; font-weight: 700; cursor: pointer; padding: 0 4px; overflow: hidden; }
+.stage-track .st span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.stage-track .st.on { background: var(--accent-soft); color: var(--text); }
+.stage-track .st.current { background: var(--gold-grad); color: var(--text-on-accent); }
+.stage-track .st:disabled { cursor: default; }
+.stage-track .st:not(:disabled):hover { outline: 1px solid var(--accent-ring); }
+
+.fu-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); min-width: 0; }
+.fu-ic { width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; flex-shrink: 0; background: var(--surface-3); color: var(--text-2); }
+.fu-ic svg { width: 15px; height: 15px; }
+
+.rule { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px dashed var(--border); }
+.segment-card { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; transition: transform 0.18s var(--ease), border-color 0.18s; }
+.segment-card:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+.template-body { white-space: pre-wrap; font-size: 13px; color: var(--text-2); background: var(--surface-2); border-radius: 10px; padding: 10px 12px; border: 1px solid var(--border); }
+
+.pipeline { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.pipe-stage { position: relative; padding: 12px 12px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; text-align: left; cursor: pointer; color: inherit; font: inherit; transition: border-color 0.15s; min-width: 0; }
+.pipe-stage:hover { border-color: var(--accent-ring); }
+.pipe-stage .k { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pipe-stage .v { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 4px; }
+.pipe-stage .m { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.pipe-stage .bar { position: absolute; left: 12px; right: 12px; bottom: 0; height: 3px; border-radius: 3px 3px 0 0; }
+.funnel-row { display: grid; grid-template-columns: 96px 1fr 80px; gap: 10px; align-items: center; font-size: 12.5px; }
+.funnel-row .track { height: 10px; border-radius: 99px; background: var(--surface-3); overflow: hidden; }
+.funnel-row .track > div { height: 100%; border-radius: 99px; background: var(--gold-grad); }
+
+@media (max-width: 1180px) { .pipeline { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 720px) {
+  .board { grid-auto-columns: 82vw; }
+  .stage-track { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .pipeline { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

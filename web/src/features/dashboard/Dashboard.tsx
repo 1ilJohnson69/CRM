@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertCircle, Ban, CalendarClock, CalendarPlus, CheckCircle2, Clock, Contact, CreditCard, Hourglass, IndianRupee, LineChart, Phone,
-  PieChart, RefreshCw, ScanLine, Snowflake, TrendingUp, UserPlus, Users, Wallet, XCircle, Activity as ActivityIcon, Receipt, Award, MessageCircle,
+  PieChart, PhoneCall, RefreshCw, ScanLine, Snowflake, TrendingUp, UserPlus, Users, Wallet, XCircle, Activity as ActivityIcon, Receipt, Award, MessageCircle,
 } from 'lucide-react';
 import { api, type Paged } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
@@ -11,12 +11,15 @@ import { useCountUp } from '../../lib/ui';
 import { date, dateShort, daysLabel, money, moneyShort, number, relative, SERVICE_LABEL } from '../../lib/format';
 import { Avatar, Button, Card, Empty, Method, Person, Segmented, Skeleton, StatusBadge, Trend } from '../../components/ui';
 import { Donut, Sparkline, StackedArea } from '../../components/charts';
+import { CompleteFollowUpDialog, STAGE_COLOR, STAGE_LABEL } from '../crm/common';
+import { FollowUpRow } from '../crm/FollowUpsPage';
 import { useActions } from '../actions';
 
 interface Summary {
   activeMembers: { value: number; frozen: number; change: number; series: number[] };
   revenue: { value: number; change: number; today: number; todayCount: number; series: number[] };
   newMembers: { value: number; change: number; series: number[] };
+  newLeads: { value: number; change: number; conversionRate: number; series: number[] };
   renewalsDue: { value: number; today: number; atStake: number };
   outstanding: { value: number; invoices: number };
 }
@@ -46,6 +49,7 @@ function Kpi({ label, icon, value, format, trend, compare, spark, hero, to }: {
 }
 
 function KpiRow() {
+  const { can } = useAuth();
   const { data } = useQuery({ queryKey: ['dash', 'summary'], queryFn: () => api.get<Summary>('/dashboard/summary') });
   if (!data) return <div className="kpi-row">{Array.from({ length: 5 }, (_, i) => <div key={i} className="card kpi"><Skeleton h={12} w={110} /><Skeleton h={30} w={130} /><Skeleton h={28} /></div>)}</div>;
   return (
@@ -56,9 +60,15 @@ function KpiRow() {
       <Kpi label="Revenue · 30 days" icon={<IndianRupee />} value={data.revenue.value} format={moneyShort}
         trend={<Trend value={data.revenue.change} />} compare={`${moneyShort(data.revenue.today)} today`} to="/payments"
         spark={<Sparkline values={data.revenue.series} variant="bars" width={92} />} />
-      <Kpi label="New members" icon={<UserPlus />} value={data.newMembers.value} format={(n) => number(Math.round(n))}
-        trend={<Trend value={data.newMembers.change} />} compare="this month vs last" to="/members?sort=joined"
-        spark={<Sparkline values={data.newMembers.series} />} />
+      {can('leads.read') ? (
+        <Kpi label="New leads" icon={<Contact />} value={data.newLeads.value} format={(n) => number(Math.round(n))}
+          trend={<Trend value={data.newLeads.change} />} compare={`${data.newLeads.conversionRate}% conversion · 90d`} to="/leads"
+          spark={<Sparkline values={data.newLeads.series} />} />
+      ) : (
+        <Kpi label="New members" icon={<UserPlus />} value={data.newMembers.value} format={(n) => number(Math.round(n))}
+          trend={<Trend value={data.newMembers.change} />} compare="this month vs last" to="/members?sort=joined"
+          spark={<Sparkline values={data.newMembers.series} />} />
+      )}
       <Kpi label="Renewals due" icon={<RefreshCw />} value={data.renewalsDue.value} format={(n) => number(Math.round(n))}
         trend={data.renewalsDue.today ? <span className="badge warning"><Hourglass />{data.renewalsDue.today} today</span> : <span className="badge neutral">None today</span>}
         compare={`next 7 days · ${moneyShort(data.renewalsDue.atStake)} at stake`} to="/?focus=renewals" />
@@ -75,7 +85,7 @@ function QuickActions() {
     { label: 'Add member', icon: <UserPlus />, onClick: can('members.write') ? actions.addMember : undefined },
     { label: 'Record payment', icon: <CreditCard />, onClick: can('payments.create') ? () => actions.recordPayment() : undefined },
     { label: 'Renew membership', icon: <RefreshCw />, onClick: can('memberships.manage') ? () => actions.sellMembership() : undefined },
-    { label: 'Add lead', icon: <Contact />, hint: 'Lead management arrives in Phase 2' },
+    { label: 'Add lead', icon: <Contact />, onClick: can('leads.write') ? actions.addLead : undefined },
     { label: 'Book appointment', icon: <CalendarPlus />, hint: 'Appointments arrive in Phase 3' },
     { label: 'Check-in member', icon: <ScanLine />, hint: 'Attendance arrives in Phase 3' },
   ];
@@ -224,7 +234,8 @@ function Attention() {
                     <td className="r">
                       <div className="row" style={{ justifyContent: 'flex-end', gap: 4 }}>
                         <a className="btn ghost sm" href={`tel:${r.phone}`} title={`Call ${r.phone}`} aria-label={`Call ${r.full_name}`}><Phone /></a>
-                        <a className="btn ghost sm" href={`https://wa.me/${r.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Hi ${r.full_name.split(' ')[0]}, your ${r.plan_name} membership ${r.days_remaining < 0 ? 'expired' : 'expires'} on ${date(r.end_date)}. Renew at the front desk to keep training without a break!`)}`} target="_blank" rel="noreferrer" title="WhatsApp" aria-label={`WhatsApp ${r.full_name}`}><MessageCircle /></a>
+                        {can('communications.log') && <button className="btn ghost sm" title="Message (logged)" aria-label={`Message ${r.full_name}`}
+                          onClick={() => actions.contact({ memberId: r.member_id, name: r.full_name, purpose: 'renewal', defaultTemplate: r.days_remaining < 0 ? 'membership_expired' : 'renewal_reminder' })}><MessageCircle /></button>}
                         {can('memberships.manage') && (
                           <Button size="sm" variant="primary" onClick={() => actions.sellMembership({ memberId: r.member_id, memberName: r.full_name, planId: r.plan_id })}>Renew</Button>
                         )}
@@ -322,8 +333,92 @@ function StaffPerformance() {
   );
 }
 
+function SalesPipeline() {
+  const navigate = useNavigate();
+  const { data } = useQuery({ queryKey: ['dash', 'pipeline'], queryFn: () => api.get<any>('/dashboard/pipeline') });
+  const open = data?.stages.filter((s: any) => !['won', 'lost'].includes(s.stage)) ?? [];
+  const won = data?.stages.find((s: any) => s.stage === 'won');
+  const lost = data?.stages.find((s: any) => s.stage === 'lost');
+  const maxCount = Math.max(1, ...open.map((s: any) => s.count));
+  const top = data?.funnel[0]?.reached || 1;
+  return (
+    <Card title="Sales pipeline" icon={<Contact />} sub="Open leads by stage · won and lost over the last 30 days"
+      actions={<Link className="btn ghost sm" to="/leads">Open board</Link>}>
+      {!data ? <Skeleton h={260} /> : (
+        <div className="stack" style={{ gap: 16 }}>
+          <div className="pipeline">
+            {open.map((s: any) => (
+              <button key={s.stage} className="pipe-stage" onClick={() => navigate('/leads')}>
+                <div className="k">{STAGE_LABEL[s.stage]}</div>
+                <div className="v">{s.count}</div>
+                <div className="m">{s.value ? moneyShort(s.value) : '—'}</div>
+                <div className="bar" style={{ background: STAGE_COLOR[s.stage], opacity: 0.35 + (s.count / maxCount) * 0.65 }} />
+              </button>
+            ))}
+          </div>
+          <div className="grid g-2" style={{ gap: 18 }}>
+            <div className="stack" style={{ gap: 8 }}>
+              <div className="section-label" style={{ marginTop: 0 }}>Conversion · leads from last 90 days</div>
+              {data.funnel.map((f: any) => (
+                <div key={f.stage} className="funnel-row">
+                  <span className="muted">{f.label}</span>
+                  <div className="track"><div style={{ width: `${(f.reached / top) * 100}%` }} /></div>
+                  <span className="num" style={{ textAlign: 'right' }}><b>{number(f.reached)}</b> <span className="faint">{Math.round((f.reached / top) * 100)}%</span></span>
+                </div>
+              ))}
+              <div className="faint" style={{ fontSize: 12 }}>{data.trials.booked} trials booked · {data.trials.booked ? Math.round((data.trials.won / data.trials.booked) * 100) : 0}% of trials converted</div>
+            </div>
+            <div className="stack" style={{ gap: 8 }}>
+              <div className="section-label" style={{ marginTop: 0 }}>Top sources · 90 days</div>
+              {data.sources.map((s: any) => (
+                <div key={s.source} className="row between" style={{ fontSize: 13 }}>
+                  <span>{s.source}</span>
+                  <span className="num"><b>{s.leads}</b> <span className="faint">leads · {s.leads ? Math.round((s.won / s.leads) * 100) : 0}% won</span></span>
+                </div>
+              ))}
+              <div className="row" style={{ gap: 8, marginTop: 4 }}>
+                <span className="badge success"><CheckCircle2 />{won?.count ?? 0} won · {moneyShort(won?.value ?? 0)}</span>
+                <span className="badge neutral"><XCircle />{lost?.count ?? 0} lost</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function MyFollowUps() {
+  const { can } = useAuth();
+  const [completing, setCompleting] = useState<any>(null);
+  const actions = useActions();
+  const { data: summary } = useQuery({ queryKey: ['fu-summary', 'me'], queryFn: () => api.get<any>('/follow-ups/summary', { assignedTo: 'me' }) });
+  const { data: overdue } = useQuery({ queryKey: ['follow-ups', 'overdue', 'me', 1], queryFn: () => api.get<Paged<any>>('/follow-ups', { bucket: 'overdue', assignedTo: 'me', pageSize: 5 }) });
+  const { data: today } = useQuery({ queryKey: ['follow-ups', 'today', 'me', 1], queryFn: () => api.get<Paged<any>>('/follow-ups', { bucket: 'today', assignedTo: 'me', pageSize: 6 }) });
+  const rows = [...(overdue?.data ?? []), ...(today?.data ?? [])].slice(0, 7);
+  return (
+    <Card title="My follow-ups" icon={<PhoneCall />} actions={<Link className="btn ghost sm" to="/follow-ups">All</Link>}>
+      <div className="stat-strip" style={{ marginBottom: 12 }}>
+        <div><div className="k">Overdue</div><div className="v" style={{ color: summary?.overdue ? 'var(--danger)' : undefined }}>{summary?.overdue ?? '—'}</div></div>
+        <div><div className="k">Today</div><div className="v">{summary?.today ?? '—'}</div></div>
+        <div><div className="k">Done today</div><div className="v">{summary?.done_today ?? '—'}</div></div>
+      </div>
+      {!overdue || !today ? <Skeleton h={200} /> : !rows.length ? <Empty icon={<CheckCircle2 size={20} />} title="All clear">Nothing due today.</Empty> : (
+        <div className="stack" style={{ gap: 6, maxHeight: 330, overflowY: 'auto' }}>
+          {rows.map((f) => (
+            <FollowUpRow key={f.id} f={f} compact
+              onComplete={can('followups.manage') ? () => setCompleting(f) : undefined}
+              onContact={can('communications.log') ? () => actions.contact({ leadId: f.lead_id ?? undefined, memberId: f.member_id ?? undefined, name: f.subject_name, purpose: f.purpose, defaultTemplate: f.purpose === 'renewal' ? 'renewal_reminder' : f.lead_id ? 'lead_follow_up' : undefined }) : undefined} />
+          ))}
+        </div>
+      )}
+      {completing && <CompleteFollowUpDialog followUp={completing} onClose={() => setCompleting(null)} />}
+    </Card>
+  );
+}
+
 export function Dashboard() {
-  const { me } = useAuth();
+  const { me, can } = useAuth();
   const hour = new Date().getHours();
   const greet = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
   return (
@@ -338,6 +433,9 @@ export function Dashboard() {
       <KpiRow />
       <QuickActions />
       <div className="grid g-dash-1"><RevenueOverview /><MembershipHealth /></div>
+      {(can('leads.read') || can('followups.manage')) && (
+        <div className="grid g-dash-1">{can('leads.read') ? <SalesPipeline /> : <div />}{can('followups.manage') && <MyFollowUps />}</div>
+      )}
       <div className="grid g-dash-3"><Attention /><ActivityFeed /></div>
       <div className="grid g-dash-2"><RecentPayments /><StaffPerformance /></div>
     </div>

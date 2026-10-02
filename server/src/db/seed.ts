@@ -3,6 +3,7 @@ import { migrate } from './migrate.js';
 import { hashPassword } from '../lib/auth.js';
 import { DEFAULT_ROLES, PERMISSIONS } from '../lib/permissions.js';
 import { addToDate, round2, today } from '../lib/http.js';
+import { seedCrm } from './seed-crm.js';
 
 // Deterministic PRNG so every seed produces the same demo data.
 let s = 20261002;
@@ -23,7 +24,9 @@ async function main() {
   await migrate();
   const existing = await one(`SELECT count(*)::int AS n FROM organizations`);
   if (existing!.n > 0) {
-    console.log('Database already seeded. Drop and recreate it to reseed.');
+    // Upgrading an existing database: only add data for modules it lacks.
+    await seedCrm();
+    console.log('Core data already present.');
     return;
   }
 
@@ -256,6 +259,7 @@ async function main() {
     await q(`INSERT INTO counters VALUES ($1,'member',$2)`, [org.id, memberSeq]);
     console.log(`Seeded ${N} members, ${plans.length} plans, ${staff.length} staff, ${audits.length} audit entries.`);
   });
+  await seedCrm();
 }
 
 main()

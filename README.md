@@ -15,7 +15,7 @@ member's app) updates in the same database transaction.
      web/ (Admin CRM)      /api/me (Member App)
 ```
 
-## Status: Phase 1 (Core) — complete
+## Status: Phase 1 (Core) and Phase 2 (CRM) — complete
 
 | Module | Backend | CRM UI |
 |---|---|---|
@@ -34,9 +34,26 @@ member's app) updates in the same database transaction.
 | Member App API (`/api/me`) with backend-decided feature access | ✅ | — (app is a separate client) |
 | Access-control check (`/api/access/check`) | ✅ | — |
 
-Phases 2–6 (leads, attendance, classes, PT, fitness, POS, inventory, marketing…)
-appear in the sidebar marked `P2`–`P6` so the full product map is visible.
+### Phase 2 — CRM
+
+| Module | What it does |
+|---|---|
+| Leads | Capture with duplicate detection (open leads and existing members by phone/email), sources, referrals, interested plan, budget, goal, owner |
+| Pipeline | Kanban board (New → Contacted → Interested → Trial booked → Trial done → Negotiation → Won / Lost) with drag and drop, list view, stage history |
+| Conversion | Won = convert: creates the member (or links an existing one), optionally sells the first plan and records payment, in one transaction |
+| Follow-ups | For leads or members; overdue / today / upcoming; complete with outcome and schedule the next one |
+| Automation | Every new lead gets a first call within the hour; booking a trial schedules a post-trial call; renewal follow-ups are created 7 days before expiry; each staff member gets a daily follow-up digest |
+| Communication | Contact composer with templates rendered per person → opens WhatsApp / SMS / email / call on the staff member's device and logs it; full activity log; logging contact moves a new lead to Contacted |
+| Segments | Typed rule builder (status, plan, expiry window, lapsed window, lifetime value, dues, PT, classes, referrals, no-contact days, gender, source, age, birthdays) with live counts, CSV export and "Open in Members" |
+| Dashboard | New-leads KPI with 90-day conversion, sales pipeline with funnel and top sources, "My follow-ups" |
+
+Phases 3–6 (attendance, classes, PT, fitness, POS, inventory, marketing…)
+appear in the sidebar marked `P3`–`P6` so the full product map is visible.
 They are not wired to fake data.
+
+Sending through a provider (WhatsApp Business API, SMS gateway, email) is
+not connected yet: staff send from their own device and the CRM keeps the
+record. `communication_logs` already has `status`/`provider` columns for that.
 
 ## Run it locally
 
@@ -46,7 +63,7 @@ Requirements: Node 20+, PostgreSQL 14+.
 createdb forge_crm                       # or point DATABASE_URL elsewhere
 cp server/.env.example server/.env       # set JWT_SECRET for anything non-local
 npm run setup                            # installs server/ and web/
-npm run db:seed                          # migrates + loads demo data
+npm run db:seed                          # migrates + loads demo data (safe to re-run: only fills missing modules)
 npm run dev:server                       # API on :4000 (runs migrations on boot)
 npm run dev:web                          # CRM on :5173 (proxies /api)
 ```
@@ -99,6 +116,14 @@ GET/POST /payments     POST /payments/:id/void
 GET/POST /invoices     GET /invoices/:id      GET /invoices/:id/pdf
 
 GET /dashboard/summary|revenue?days=|membership-health|attention|activity|staff
+GET /leads/board   GET/POST /leads   GET/PATCH /leads/:id   POST /leads/:id/move|convert|reopen
+GET /leads/sources|duplicates
+GET/POST /follow-ups   GET /follow-ups/summary   POST /follow-ups/:id/complete|cancel   PATCH /follow-ups/:id
+GET/POST /communications   GET /communications/stats
+GET/POST /templates   PUT /templates/:id   GET /templates/compose?leadId|memberId&templateKey
+GET/POST /segments   PUT/DELETE /segments/:id   POST /segments/preview   GET /segments/:id/members|export
+GET /dashboard/pipeline
+
 GET /search?q=         GET /notifications      POST /notifications/read
 GET /access/check?code=
 
@@ -113,13 +138,13 @@ GET /me   GET /me/memberships|payments|invoices|notifications   GET /me/invoices
 
 ```
 server/src/
-  db/migrations/   SQL schema (001_core, 002_views)
+  db/migrations/   SQL schema (001_core, 002_views, 003_crm)
   db/seed.ts       deterministic demo data (~14 months of history)
   lib/             auth, RBAC catalog, audit, errors, helpers
-  modules/         auth, members, memberships, billing, dashboard, admin, common, app (/me)
-  jobs/            renewal reminders
+  modules/         auth, members, memberships, billing, dashboard, admin, common, crm (leads, engagement, segments), app (/me)
+  jobs/            renewal reminders, follow-up automation
 web/src/
   styles/          design tokens (dark + light) and component styles
   components/      UI primitives, charts, app shell
-  features/        dashboard, members, memberships, billing, admin, auth
+  features/        dashboard, members, memberships, billing, crm, admin, auth
 ```

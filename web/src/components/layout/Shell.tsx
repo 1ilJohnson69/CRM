@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
 import {
   Bell, Building2, ChevronDown, CreditCard, KeyRound, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw,
-  Search, Sun, UserPlus, Users, Receipt, UserCog, AlertTriangle, CheckCheck,
+  Search, Sun, UserPlus, Users, Receipt, UserCog, AlertTriangle, CheckCheck, Contact,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
@@ -62,7 +62,7 @@ function Sidebar() {
   );
 }
 
-type SearchResult = { members: any[]; invoices: any[]; payments: any[]; staff: any[] };
+type SearchResult = { members: any[]; leads?: any[]; invoices: any[]; payments: any[]; staff: any[] };
 
 function GlobalSearch() {
   const [q, setQ] = useState('');
@@ -86,6 +86,7 @@ function GlobalSearch() {
 
   const flat = [
     ...(data?.members ?? []).map((r) => ({ ...r, group: 'Members', to: `/members/${r.id}`, icon: <Users size={15} /> })),
+    ...(data?.leads ?? []).map((r) => ({ ...r, group: 'Leads', to: `/leads?lead=${r.id}`, icon: <Contact size={15} /> })),
     ...(data?.invoices ?? []).map((r) => ({ ...r, group: 'Invoices', to: `/invoices/${r.id}`, icon: <Receipt size={15} /> })),
     ...(data?.payments ?? []).map((r) => ({ ...r, group: 'Payments', to: `/invoices/${r.invoice_id}`, icon: <CreditCard size={15} /> })),
     ...(data?.staff ?? []).map((r) => ({ ...r, group: 'Employees', to: `/admin/employees?focus=${r.id}`, icon: <UserCog size={15} /> })),
@@ -164,7 +165,7 @@ function Notifications() {
             {data?.data.map((n) => (
               <div
                 key={n.id} className={clsx('notif', n.priority === 'high' && 'high', !n.read_at && 'unread')} role="button" tabIndex={0}
-                onClick={() => { close(); if (n.type === 'renewals.digest') navigate('/?focus=renewals'); }}
+                onClick={() => { close(); if (n.type === 'renewals.digest') navigate('/?focus=renewals'); else if (n.type === 'followups.digest') navigate('/follow-ups'); else if (n.entity_type === 'lead' && n.entity_id) navigate(`/leads?lead=${n.entity_id}`); }}
               >
                 <div className="ic">{n.priority === 'high' ? <AlertTriangle /> : <RefreshCw />}</div>
                 <div>
@@ -191,6 +192,7 @@ function QuickAdd() {
       {(close) => (
         <>
           {can('members.write') && <button className="menu-item" onClick={() => { close(); actions.addMember(); }}><UserPlus />Add member</button>}
+          {can('leads.write') && <button className="menu-item" onClick={() => { close(); actions.addLead(); }}><Contact />Add lead</button>}
           {can('payments.create') && <button className="menu-item" onClick={() => { close(); actions.recordPayment(); }}><CreditCard />Record payment</button>}
           {can('memberships.manage') && <button className="menu-item" onClick={() => { close(); actions.sellMembership(); }}><RefreshCw />Renew / sell membership</button>}
         </>

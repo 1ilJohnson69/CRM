@@ -1,6 +1,6 @@
 import {
   Activity, Apple, BarChart3, Building2, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, Contact, CreditCard, Dumbbell,
-  Gift, Handshake, LayoutDashboard, Megaphone, MessageSquare, Package, PhoneCall, Receipt, ScanLine, ScrollText,
+  Gift, Handshake, Layers, LayoutDashboard, Megaphone, MessageSquare, Package, PhoneCall, Receipt, ScanLine, ScrollText,
   Settings, ShieldCheck, ShoppingBag, Ticket, Trophy, UserCog, Users, Wallet, type LucideIcon,
 } from 'lucide-react';
 
@@ -19,8 +19,9 @@ export const NAV: { group: string | null; items: NavItem[] }[] = [
     group: 'CRM',
     items: [
       { label: 'Members', to: '/members', icon: Users, perm: 'members.read' },
-      { label: 'Leads', to: '/leads', icon: Contact, phase: 2 },
-      { label: 'Follow-ups', to: '/follow-ups', icon: PhoneCall, phase: 2 },
+      { label: 'Leads', to: '/leads', icon: Contact, perm: 'leads.read' },
+      { label: 'Follow-ups', to: '/follow-ups', icon: PhoneCall, perm: 'followups.manage' },
+      { label: 'Segments', to: '/segments', icon: Layers, perm: 'members.read' },
     ],
   },
   {
@@ -64,7 +65,7 @@ export const NAV: { group: string | null; items: NavItem[] }[] = [
       { label: 'Loyalty', to: '/loyalty', icon: Gift, phase: 5 },
       { label: 'Referrals', to: '/referrals', icon: Handshake, phase: 5 },
       { label: 'Marketing', to: '/marketing', icon: Megaphone, phase: 6 },
-      { label: 'Communication', to: '/communication', icon: MessageSquare, phase: 2 },
+      { label: 'Communication', to: '/communication', icon: MessageSquare, perm: 'communications.log' },
     ],
   },
   { group: 'Insights', items: [{ label: 'Analytics', to: '/analytics', icon: BarChart3, phase: 6 }] },

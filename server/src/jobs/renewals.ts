@@ -38,8 +38,48 @@ export async function runRenewalReminders() {
      GROUP BY m.organization_id, m.branch_id, b.name`);
 }
 
+/**
+ * Turns renewal risk into work: every member 7 days from expiry (or already
+ * lapsed within 3 days) gets one renewal follow-up for their assigned staff.
+ * Also sends each staff member a daily digest of their follow-ups.
+ */
+export async function runFollowUpAutomation() {
+  await pool.query(`
+    INSERT INTO follow_ups (organization_id, branch_id, member_id, type, purpose, due_at, assigned_to, notes, auto_generated)
+    SELECT m.organization_id, m.branch_id, m.id, 'call', 'renewal',
+           date_trunc('day', now()) + interval '10 hours',
+           COALESCE(m.assigned_staff_id, (SELECT sb.user_id FROM staff_branches sb JOIN users su ON su.id = sb.user_id AND su.is_active
+                                            JOIN roles r ON r.id = su.role_id AND r.key = 'front_desk'
+                                           WHERE sb.branch_id = m.branch_id ORDER BY su.created_at LIMIT 1)),
+           cm.plan_name || ' ' || CASE WHEN cm.days_remaining < 0 THEN 'expired ' || -cm.days_remaining || ' days ago' ELSE 'expires in ' || cm.days_remaining || ' days' END,
+           true
+      FROM members m
+      JOIN member_current_membership cm ON cm.member_id = m.id
+     WHERE cm.status IN ('active', 'expiring_soon', 'expired') AND NOT cm.has_upcoming AND NOT cm.is_pass
+       AND cm.days_remaining BETWEEN -3 AND 7
+       AND NOT EXISTS (
+         SELECT 1 FROM follow_ups f WHERE f.member_id = m.id AND f.purpose = 'renewal'
+            AND (f.status = 'pending' OR f.created_at >= cm.end_date - 10))`);
+
+  await pool.query(`
+    INSERT INTO notifications (organization_id, recipient_id, audience, type, priority, title, body)
+    SELECT f.organization_id, f.assigned_to, 'staff', 'followups.digest',
+           CASE WHEN count(*) FILTER (WHERE f.due_at < date_trunc('day', now())) > 0 THEN 'high' ELSE 'normal' END,
+           count(*) || ' follow-ups on your list today',
+           count(*) FILTER (WHERE f.due_at < date_trunc('day', now())) || ' overdue · ' ||
+           count(*) FILTER (WHERE f.purpose = 'renewal') || ' renewals · ' ||
+           count(*) FILTER (WHERE f.lead_id IS NOT NULL) || ' leads'
+      FROM follow_ups f
+     WHERE f.status = 'pending' AND f.assigned_to IS NOT NULL AND f.due_at < date_trunc('day', now()) + interval '1 day'
+       AND NOT EXISTS (SELECT 1 FROM notifications n WHERE n.type = 'followups.digest' AND n.recipient_id = f.assigned_to AND n.created_at >= current_date)
+     GROUP BY f.organization_id, f.assigned_to`);
+}
+
 export function scheduleJobs() {
-  const run = () => runRenewalReminders().catch((err) => console.error('renewal reminders failed', err));
+  const run = () =>
+    runRenewalReminders()
+      .then(runFollowUpAutomation)
+      .catch((err) => console.error('scheduled jobs failed', err));
   run();
   setInterval(run, 60 * 60 * 1000).unref();
 }
