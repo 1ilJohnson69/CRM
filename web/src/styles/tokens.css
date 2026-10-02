@@ -1,0 +1,112 @@
+/* Forge design tokens. Dark is the primary, intentionally designed theme;
+   light is its own warm-neutral composition, not an inversion. */
+
+:root {
+  color-scheme: dark;
+  --font: 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Brand */
+  --gold-1: #A67D4C;
+  --gold-2: #CFA56D;
+  --gold-3: #ECD19E;
+  --gold-grad: linear-gradient(90deg, #A67D4C 0%, #CFA56D 50%, #ECD19E 100%);
+  --ember: #903C25;
+
+  /* Surfaces */
+  --bg: #0C0708;
+  --surface: #141011;
+  --surface-2: #1B1617;
+  --surface-3: #241E1F;
+  --surface-hover: #2A2324;
+  --border: rgba(236, 209, 158, 0.07);
+  --border-strong: rgba(236, 209, 158, 0.14);
+  --overlay: rgba(6, 3, 4, 0.72);
+
+  /* Text */
+  --text: #F5EFE8;
+  --text-2: #A99F99;
+  --text-3: #6F6562;
+  --text-on-accent: #1A1108;
+
+  /* Accent */
+  --accent: #CFA56D;
+  --accent-strong: #ECD19E;
+  --accent-soft: rgba(207, 165, 109, 0.12);
+  --accent-ring: rgba(207, 165, 109, 0.35);
+  --glow: radial-gradient(60% 80% at 0% 0%, rgba(144, 60, 37, 0.38), transparent 70%);
+  --glow-soft: radial-gradient(70% 90% at 100% 0%, rgba(144, 60, 37, 0.16), transparent 70%);
+
+  /* Status (reserved — never reused for series) */
+  --success: #8CCB6E;
+  --success-soft: rgba(140, 203, 110, 0.12);
+  --warning: #F4C95D;
+  --warning-soft: rgba(244, 201, 93, 0.12);
+  --danger: #FF6B6B;
+  --danger-soft: rgba(255, 107, 107, 0.12);
+  --info: #8FB3E8;
+  --info-soft: rgba(143, 179, 232, 0.12);
+  --neutral-soft: rgba(169, 159, 153, 0.12);
+
+  /* Categorical series — validated for the dark surface (fixed order) */
+  --series-1: #B8832A; /* membership */
+  --series-2: #3E9E7A; /* personal training */
+  --series-3: #D85A3C; /* classes */
+  --series-4: #8780E6; /* products */
+  --series-5: #C9548E; /* other */
+
+  /* Shape & rhythm */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 22px;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 12px 32px -18px rgba(0, 0, 0, 0.9);
+  --shadow-pop: 0 24px 64px -24px rgba(0, 0, 0, 0.85), 0 0 0 1px var(--border-strong);
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --sidebar-w: 248px;
+  --sidebar-w-collapsed: 72px;
+  --topbar-h: 64px;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --bg: #F3F1EC;
+  --surface: #FFFFFF;
+  --surface-2: #F8F6F2;
+  --surface-3: #EFEBE4;
+  --surface-hover: #F1EDE6;
+  --border: rgba(40, 28, 20, 0.08);
+  --border-strong: rgba(40, 28, 20, 0.14);
+  --overlay: rgba(30, 22, 18, 0.35);
+
+  --text: #1E1817;
+  --text-2: #625A56;
+  --text-3: #958B86;
+  --text-on-accent: #1A1108;
+
+  --accent: #A67D4C;
+  --accent-strong: #8A6236;
+  --accent-soft: rgba(166, 125, 76, 0.12);
+  --accent-ring: rgba(166, 125, 76, 0.35);
+  --glow: radial-gradient(60% 80% at 0% 0%, rgba(207, 165, 109, 0.28), transparent 70%);
+  --glow-soft: radial-gradient(70% 90% at 100% 0%, rgba(207, 165, 109, 0.14), transparent 70%);
+
+  --success: #3E8A3A;
+  --success-soft: rgba(62, 138, 58, 0.1);
+  --warning: #A86B00;
+  --warning-soft: rgba(212, 150, 30, 0.14);
+  --danger: #C63B3B;
+  --danger-soft: rgba(198, 59, 59, 0.1);
+  --info: #3667B0;
+  --info-soft: rgba(54, 103, 176, 0.1);
+  --neutral-soft: rgba(98, 90, 86, 0.1);
+
+  /* Categorical series — validated for the light surface (same order) */
+  --series-1: #A8741F;
+  --series-2: #17876F;
+  --series-3: #C84B2F;
+  --series-4: #6B5DD3;
+  --series-5: #B8457A;
+
+  --shadow: 0 1px 2px rgba(40, 28, 20, 0.04), 0 10px 28px -20px rgba(40, 28, 20, 0.3);
+  --shadow-pop: 0 24px 56px -24px rgba(40, 28, 20, 0.35), 0 0 0 1px var(--border-strong);
+}

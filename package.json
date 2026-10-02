@@ -1,0 +1,13 @@
+{
+  "name": "forge-gym-os",
+  "private": true,
+  "scripts": {
+    "setup": "npm install --prefix server && npm install --prefix web",
+    "dev:server": "npm run dev --prefix server",
+    "dev:web": "npm run dev --prefix web",
+    "db:migrate": "npm run migrate --prefix server",
+    "db:seed": "npm run seed --prefix server",
+    "typecheck": "npm run typecheck --prefix server && cd web && npx tsc -p tsconfig.app.json --noEmit",
+    "build": "npm run build --prefix server && npm run build --prefix web"
+  }
+}
