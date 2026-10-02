@@ -13,6 +13,8 @@ import { Avatar, Button, Card, Empty, Method, Person, Segmented, Skeleton, Statu
 import { Donut, Sparkline, StackedArea } from '../../components/charts';
 import { CompleteFollowUpDialog, STAGE_COLOR, STAGE_LABEL } from '../crm/common';
 import { FollowUpRow } from '../crm/FollowUpsPage';
+import { AttendanceAnalytics } from '../ops/AttendancePage';
+import { AppointmentDialog, APPT_LABEL, timeLabel } from '../ops/common';
 import { useActions } from '../actions';
 
 interface Summary {
@@ -20,6 +22,7 @@ interface Summary {
   revenue: { value: number; change: number; today: number; todayCount: number; series: number[] };
   newMembers: { value: number; change: number; series: number[] };
   newLeads: { value: number; change: number; conversionRate: number; series: number[] };
+  todayAttendance: { value: number; change: number; series: number[] };
   renewalsDue: { value: number; today: number; atStake: number };
   outstanding: { value: number; invoices: number };
 }
@@ -72,8 +75,14 @@ function KpiRow() {
       <Kpi label="Renewals due" icon={<RefreshCw />} value={data.renewalsDue.value} format={(n) => number(Math.round(n))}
         trend={data.renewalsDue.today ? <span className="badge warning"><Hourglass />{data.renewalsDue.today} today</span> : <span className="badge neutral">None today</span>}
         compare={`next 7 days · ${moneyShort(data.renewalsDue.atStake)} at stake`} to="/?focus=renewals" />
-      <Kpi label="Outstanding" icon={<Wallet />} value={data.outstanding.value} format={moneyShort}
-        trend={<span className="badge warning"><Receipt />{data.outstanding.invoices} invoices</span>} compare="pending collection" to="/invoices?status=outstanding" />
+      {can('attendance.read') ? (
+        <Kpi label="Today’s check-ins" icon={<ScanLine />} value={data.todayAttendance.value} format={(n) => number(Math.round(n))}
+          trend={<Trend value={data.todayAttendance.change} />} compare={`vs this time last week · ${moneyShort(data.outstanding.value)} dues open`} to="/attendance"
+          spark={<Sparkline values={data.todayAttendance.series} variant="bars" width={92} />} />
+      ) : (
+        <Kpi label="Outstanding" icon={<Wallet />} value={data.outstanding.value} format={moneyShort}
+          trend={<span className="badge warning"><Receipt />{data.outstanding.invoices} invoices</span>} compare="pending collection" to="/invoices?status=outstanding" />
+      )}
     </div>
   );
 }
@@ -81,13 +90,15 @@ function KpiRow() {
 function QuickActions() {
   const actions = useActions();
   const { can } = useAuth();
+  const navigate = useNavigate();
+  const [booking, setBooking] = useState(false);
   const items: { label: string; icon: ReactNode; onClick?: () => void; hint?: string }[] = [
     { label: 'Add member', icon: <UserPlus />, onClick: can('members.write') ? actions.addMember : undefined },
     { label: 'Record payment', icon: <CreditCard />, onClick: can('payments.create') ? () => actions.recordPayment() : undefined },
     { label: 'Renew membership', icon: <RefreshCw />, onClick: can('memberships.manage') ? () => actions.sellMembership() : undefined },
     { label: 'Add lead', icon: <Contact />, onClick: can('leads.write') ? actions.addLead : undefined },
-    { label: 'Book appointment', icon: <CalendarPlus />, hint: 'Appointments arrive in Phase 3' },
-    { label: 'Check-in member', icon: <ScanLine />, hint: 'Attendance arrives in Phase 3' },
+    { label: 'Book appointment', icon: <CalendarPlus />, onClick: can('appointments.manage') ? () => setBooking(true) : undefined },
+    { label: 'Check-in member', icon: <ScanLine />, onClick: can('attendance.checkin') ? () => navigate('/front-desk') : undefined },
   ];
   return (
     <div className="quick-actions">
@@ -96,6 +107,7 @@ function QuickActions() {
           <span className="ic">{i.icon}</span>{i.label}
         </button>
       ))}
+      {booking && <AppointmentDialog onClose={() => setBooking(false)} />}
     </div>
   );
 }
@@ -333,6 +345,36 @@ function StaffPerformance() {
   );
 }
 
+function TodayCard() {
+  const { data } = useQuery({ queryKey: ['dash', 'today'], queryFn: () => api.get<any>('/dashboard/today'), refetchInterval: 60_000 });
+  const upcomingClasses = (data?.classes ?? []).filter((c: any) => c.status === 'scheduled' && Date.parse(c.ends_at) > Date.now());
+  const upcomingAppts = (data?.appointments ?? []).filter((a: any) => a.status === 'scheduled');
+  return (
+    <Card title="Today at the gym" icon={<CalendarClock />} sub={data ? `${data.classes.length} classes · ${data.appointments.length} appointments` : undefined}
+      actions={<Link className="btn ghost sm" to="/front-desk">Front desk</Link>}>
+      {!data ? <Skeleton h={260} /> : (
+        <div className="stack" style={{ gap: 6, maxHeight: 420, overflowY: 'auto' }}>
+          {!upcomingClasses.length && !upcomingAppts.length && <Empty title="Nothing else scheduled today" />}
+          {[...upcomingClasses.map((c: any) => ({ at: c.starts_at, kind: 'class', c })), ...upcomingAppts.map((a: any) => ({ at: a.starts_at, kind: 'appt', a }))]
+            .sort((x, y) => x.at.localeCompare(y.at)).slice(0, 10).map((x: any) => x.kind === 'class' ? (
+              <Link key={x.c.id} to={`/classes?session=${x.c.id}`} className="fu-row">
+                <span className="num" style={{ width: 62, fontWeight: 800 }}>{timeLabel(x.c.starts_at)}</span>
+                <div style={{ flex: 1, minWidth: 0 }}><b>{x.c.class_name}</b><div className="faint" style={{ fontSize: 12 }}>{x.c.trainer_name ?? '—'} · {x.c.booked}/{x.c.capacity} booked{x.c.waitlisted ? ` · ${x.c.waitlisted} waitlisted` : ''}</div></div>
+                <span className="badge neutral">Class</span>
+              </Link>
+            ) : (
+              <Link key={x.a.id} to="/appointments" className="fu-row">
+                <span className="num" style={{ width: 62, fontWeight: 800 }}>{timeLabel(x.a.starts_at)}</span>
+                <div style={{ flex: 1, minWidth: 0 }}><b>{x.a.client_name}</b><div className="faint" style={{ fontSize: 12 }}>{APPT_LABEL[x.a.type]}{x.a.staff_name ? ` · ${x.a.staff_name}` : ''}</div></div>
+                <span className="badge accent">{x.a.type === 'pt' ? 'PT' : 'Appt'}</span>
+              </Link>
+            ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function SalesPipeline() {
   const navigate = useNavigate();
   const { data } = useQuery({ queryKey: ['dash', 'pipeline'], queryFn: () => api.get<any>('/dashboard/pipeline') });
@@ -433,6 +475,7 @@ export function Dashboard() {
       <KpiRow />
       <QuickActions />
       <div className="grid g-dash-1"><RevenueOverview /><MembershipHealth /></div>
+      {can('attendance.read') && <div className="grid g-dash-1"><AttendanceAnalytics compact /><TodayCard /></div>}
       {(can('leads.read') || can('followups.manage')) && (
         <div className="grid g-dash-1">{can('leads.read') ? <SalesPipeline /> : <div />}{can('followups.manage') && <MyFollowUps />}</div>
       )}

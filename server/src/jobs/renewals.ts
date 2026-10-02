@@ -1,3 +1,4 @@
+import { generateSessions } from '../modules/ops/classes.js';
 import { pool } from '../db/pool.js';
 
 /**
@@ -75,10 +76,61 @@ export async function runFollowUpAutomation() {
      GROUP BY f.organization_id, f.assigned_to`);
 }
 
+/**
+ * Operations automation: keep the timetable three weeks ahead, close
+ * finished classes, turn "stopped coming" into a win-back follow-up, and
+ * remind members about tomorrow's classes and appointments.
+ */
+export async function runOpsAutomation() {
+  await generateSessions();
+  await pool.query(`UPDATE class_sessions SET status = 'completed' WHERE status = 'scheduled' AND ends_at < now() - interval '1 hour'`);
+
+  await pool.query(`
+    INSERT INTO follow_ups (organization_id, branch_id, member_id, type, purpose, due_at, assigned_to, notes, auto_generated)
+    SELECT m.organization_id, m.branch_id, m.id, 'call', 'reactivation', date_trunc('day', now()) + interval '11 hours',
+           m.assigned_staff_id,
+           'No visit in ' || (current_date - COALESCE(vs.last_visit_at::date, m.join_date)) || ' days',
+           true
+      FROM members m
+      JOIN organizations o ON o.id = m.organization_id
+      JOIN member_current_membership cm ON cm.member_id = m.id
+      JOIN member_visit_stats vs ON vs.member_id = m.id
+     WHERE cm.status IN ('active', 'expiring_soon') AND NOT cm.is_pass
+       AND COALESCE(vs.last_visit_at, m.join_date::timestamptz) < now() - make_interval(days => o.inactive_after_days)
+       AND NOT EXISTS (SELECT 1 FROM follow_ups f WHERE f.member_id = m.id AND f.purpose IN ('reactivation', 'renewal')
+                         AND (f.status = 'pending' OR f.created_at > now() - interval '30 days'))`);
+
+  await pool.query(`
+    WITH due AS (
+      UPDATE appointments a SET reminder_sent_at = now()
+       WHERE a.status = 'scheduled' AND a.member_id IS NOT NULL AND a.reminder_sent_at IS NULL
+         AND a.starts_at > now() AND a.starts_at < now() + interval '24 hours'
+      RETURNING a.*)
+    INSERT INTO notifications (organization_id, branch_id, recipient_id, audience, type, title, body, entity_type, entity_id)
+    SELECT d.organization_id, d.branch_id, m.user_id, 'member', 'appointment.reminder',
+           CASE d.type WHEN 'pt' THEN 'PT session' WHEN 'nutrition' THEN 'Nutrition consult' WHEN 'assessment' THEN 'Fitness assessment' ELSE 'Appointment' END || ' tomorrow',
+           to_char(d.starts_at AT TIME ZONE o.timezone, 'Dy DD Mon, HH12:MI AM') || COALESCE(' with ' || su.full_name, ''),
+           'appointment', d.id
+      FROM due d JOIN members m ON m.id = d.member_id JOIN organizations o ON o.id = d.organization_id LEFT JOIN users su ON su.id = d.staff_id`);
+
+  await pool.query(`
+    WITH due AS (
+      UPDATE class_bookings cb SET reminder_sent_at = now() FROM class_sessions cs
+       WHERE cs.id = cb.session_id AND cb.status = 'booked' AND cb.reminder_sent_at IS NULL AND cs.status = 'scheduled'
+         AND cs.starts_at > now() AND cs.starts_at < now() + interval '24 hours'
+      RETURNING cb.member_id, cs.id AS session_id, cs.starts_at, cs.class_type_id, cs.organization_id, cs.branch_id)
+    INSERT INTO notifications (organization_id, branch_id, recipient_id, audience, type, title, body, entity_type, entity_id)
+    SELECT d.organization_id, d.branch_id, m.user_id, 'member', 'class.reminder', ct.name || ' coming up',
+           to_char(d.starts_at AT TIME ZONE o.timezone, 'Dy DD Mon, HH12:MI AM') || ' · cancel in the app if you can’t make it',
+           'class_session', d.session_id
+      FROM due d JOIN members m ON m.id = d.member_id JOIN class_types ct ON ct.id = d.class_type_id JOIN organizations o ON o.id = d.organization_id`);
+}
+
 export function scheduleJobs() {
   const run = () =>
     runRenewalReminders()
       .then(runFollowUpAutomation)
+      .then(runOpsAutomation)
       .catch((err) => console.error('scheduled jobs failed', err));
   run();
   setInterval(run, 60 * 60 * 1000).unref();

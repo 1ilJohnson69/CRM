@@ -28,17 +28,17 @@ export const NAV: { group: string | null; items: NavItem[] }[] = [
     group: 'Sales',
     items: [
       { label: 'Memberships', to: '/memberships', icon: Ticket, perm: 'plans.read' },
-      { label: 'Personal Training', to: '/pt', icon: Dumbbell, phase: 3 },
-      { label: 'Classes', to: '/classes', icon: CalendarDays, phase: 3 },
+      { label: 'Personal Training', to: '/pt', icon: Dumbbell, perm: 'appointments.read' },
+      { label: 'Classes', to: '/classes', icon: CalendarDays, perm: 'classes.read' },
       { label: 'Events', to: '/events', icon: Trophy, phase: 6 },
     ],
   },
   {
     group: 'Operations',
     items: [
-      { label: 'Attendance', to: '/attendance', icon: ScanLine, phase: 3 },
-      { label: 'Appointments', to: '/appointments', icon: CalendarClock, phase: 3 },
-      { label: 'Front Desk', to: '/front-desk', icon: ClipboardCheck, phase: 3 },
+      { label: 'Attendance', to: '/attendance', icon: ScanLine, perm: 'attendance.read' },
+      { label: 'Appointments', to: '/appointments', icon: CalendarClock, perm: 'appointments.read' },
+      { label: 'Front Desk', to: '/front-desk', icon: ClipboardCheck, perm: 'attendance.checkin' },
       { label: 'POS', to: '/pos', icon: ShoppingBag, phase: 5 },
       { label: 'Inventory', to: '/inventory', icon: Package, phase: 5 },
     ],

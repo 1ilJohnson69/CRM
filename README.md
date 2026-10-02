@@ -15,7 +15,7 @@ member's app) updates in the same database transaction.
      web/ (Admin CRM)      /api/me (Member App)
 ```
 
-## Status: Phase 1 (Core) and Phase 2 (CRM) — complete
+## Status: Phases 1–3 (Core, CRM, Gym operations) — complete
 
 | Module | Backend | CRM UI |
 |---|---|---|
@@ -47,8 +47,22 @@ member's app) updates in the same database transaction.
 | Segments | Typed rule builder (status, plan, expiry window, lapsed window, lifetime value, dues, PT, classes, referrals, no-contact days, gender, source, age, birthdays) with live counts, CSV export and "Open in Members" |
 | Dashboard | New-leads KPI with 90-day conversion, sales pipeline with funnel and top sources, "My follow-ups" |
 
-Phases 3–6 (attendance, classes, PT, fitness, POS, inventory, marketing…)
-appear in the sidebar marked `P3`–`P6` so the full product map is visible.
+### Phase 3 — Gym operations
+
+| Module | What it does |
+|---|---|
+| Front desk | Scan member QR / type member ID or phone → instant allow/deny with reason (expired, frozen, unpaid, wrong branch), auto check-in, manager override with reason (audited), and one-click collect / renew / book class / book PT / sell PT |
+| Attendance | Every entry attempt including denials; de-duplicated repeat scans; check-out; live "in the gym now"; daily trend, weekday×hour heatmap, peak hour, inactive members; staff clock-in/out |
+| Member app QR | `GET /me/checkin-code` issues a 2-minute signed code the desk scans |
+| Classes | Class types, recurring schedules that generate sessions 3 weeks ahead, capacity with automatic waitlist promotion, eligibility (active plan with class access, home branch), session cancellation that notifies members, roster attendance |
+| Appointments | PT, assessments, nutrition, trials, consultations; day (per staff) / week / month calendar; click a slot to book; conflict checks against other appointments, classes taught and working hours |
+| Personal training | Package catalog; selling a package raises the invoice (same billing/activation rules as memberships); sessions used are derived from completed / no-show appointments; trainer profiles and weekly availability |
+| Pipeline link | Booking a trial for a lead moves it to Trial booked; completing it moves it to Trial completed |
+| Automation | Sessions generated daily; finished classes closed; members with no visit in 14 days get a win-back follow-up; members are reminded 24h before classes and appointments |
+| Segments | New rules: no visit in N days, visits in the last 30 days |
+
+Phases 4–6 (fitness, POS, inventory, marketing…) appear in the sidebar
+marked `P4`–`P6` so the full product map is visible.
 They are not wired to fake data.
 
 Sending through a provider (WhatsApp Business API, SMS gateway, email) is
@@ -70,7 +84,7 @@ npm run dev:web                          # CRM on :5173 (proxies /api)
 
 Demo staff logins (password `Forge@2026`): `admin@forge.fit` (Super Admin),
 `meera@forge.fit` (Branch Manager), `sneha@forge.fit` (Front Desk),
-`accounts@forge.fit` (Accountant). Seeded members can sign in to the Member
+`accounts@forge.fit` (Accountant), `rohan@forge.fit` (Trainer). Seeded members can sign in to the Member
 App API with their phone/email and `Member@2026`.
 
 ## Key design decisions
@@ -122,7 +136,16 @@ GET/POST /follow-ups   GET /follow-ups/summary   POST /follow-ups/:id/complete|c
 GET/POST /communications   GET /communications/stats
 GET/POST /templates   PUT /templates/:id   GET /templates/compose?leadId|memberId&templateKey
 GET/POST /segments   PUT/DELETE /segments/:id   POST /segments/preview   GET /segments/:id/members|export
-GET /dashboard/pipeline
+GET /dashboard/pipeline|today
+
+POST /attendance/check-in   POST /attendance/:id/check-out   GET /attendance|live|analytics|lookup
+GET /attendance/staff   POST /attendance/staff/clock
+GET/POST /classes/types|schedules   PUT /classes/types/:id|schedules/:id
+GET/POST /classes/sessions   GET/PATCH /classes/sessions/:id   POST /classes/sessions/:id/cancel|bookings
+POST /classes/bookings/:id/cancel|attendance
+GET/POST /appointments   PATCH /appointments/:id   POST /appointments/:id/complete|cancel   GET /appointments/staff|availability
+GET/POST /pt/packages   PUT /pt/packages/:id   GET/POST /pt/member-packages   PATCH /pt/member-packages/:id   POST /pt/member-packages/:id/cancel
+GET /pt/trainers   PUT /pt/trainers/:id
 
 GET /search?q=         GET /notifications      POST /notifications/read
 GET /access/check?code=
@@ -131,20 +154,21 @@ GET/POST/PUT /admin/branches|staff|roles      GET /admin/permissions
 GET/PUT /admin/organization                   GET /admin/audit-logs
 
 # Member App
-GET /me   GET /me/memberships|payments|invoices|notifications   GET /me/invoices/:id/pdf
+GET /me   GET /me/memberships|payments|invoices|notifications|attendance|classes|pt|appointments|checkin-code
+GET /me/invoices/:id/pdf   POST /me/classes/:sessionId/book   POST /me/bookings/:id/cancel
 ```
 
 ## Layout
 
 ```
 server/src/
-  db/migrations/   SQL schema (001_core, 002_views, 003_crm)
+  db/migrations/   SQL schema (001_core, 002_views, 003_crm, 004_ops)
   db/seed.ts       deterministic demo data (~14 months of history)
   lib/             auth, RBAC catalog, audit, errors, helpers
-  modules/         auth, members, memberships, billing, dashboard, admin, common, crm (leads, engagement, segments), app (/me)
-  jobs/            renewal reminders, follow-up automation
+  modules/         auth, members, memberships, billing, dashboard, admin, common, crm (leads, engagement, segments), ops (attendance, classes, appointments + PT), app (/me)
+  jobs/            renewal reminders, follow-up and operations automation
 web/src/
   styles/          design tokens (dark + light) and component styles
   components/      UI primitives, charts, app shell
-  features/        dashboard, members, memberships, billing, crm, admin, auth
+  features/        dashboard, members, memberships, billing, crm, ops, admin, auth
 ```

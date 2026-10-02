@@ -30,6 +30,9 @@ export function describeRules(r: Record<string, any>, plans: any[] = []) {
   if (r.sources?.length) out.push(`via ${r.sources.join(' / ')}`);
   if (r.ageMin !== undefined || r.ageMax !== undefined) out.push(`age ${r.ageMin ?? 0}–${r.ageMax ?? '∞'}`);
   if (r.birthdayThisMonth) out.push('birthday this month');
+  if (r.inactiveDays !== undefined) out.push(`no visit in ${r.inactiveDays} days`);
+  if (r.minVisits30d !== undefined) out.push(`≥ ${r.minVisits30d} visits/30d`);
+  if (r.maxVisits30d !== undefined) out.push(`≤ ${r.maxVisits30d} visits/30d`);
   return out.length ? out.join(' · ') : 'All members';
 }
 
@@ -52,7 +55,7 @@ function NumberRule({ label, k, rules, setRules, prefix, suffix }: { label: stri
   const on = rules[k] !== undefined;
   return (
     <div className="rule">
-      <label className="check"><input type="checkbox" checked={on} onChange={(e) => { const r = { ...rules }; if (e.target.checked) r[k] = k.startsWith('lifetime') ? 50000 : 30; else delete r[k]; setRules(r); }} />{label}</label>
+      <label className="check"><input type="checkbox" checked={on} onChange={(e) => { const r = { ...rules }; if (e.target.checked) r[k] = k.startsWith('lifetime') ? 50000 : k.includes('Visits') ? 4 : k === 'inactiveDays' ? 14 : 30; else delete r[k]; setRules(r); }} />{label}</label>
       {on && (
         <div className="row" style={{ gap: 6 }}>
           {prefix && <span className="faint">{prefix}</span>}
@@ -138,7 +141,9 @@ export function SegmentBuilder({ segment, onClose }: { segment?: any; onClose: (
         <div className="section-label">Engagement</div>
         <TriRule label="Referred someone who joined" k="referredSomeone" rules={rules} setRules={setRules} yes="Yes" no="No" />
         <NumberRule label="Not contacted in" k="noContactDays" rules={rules} setRules={setRules} suffix="days" />
-        <div className="rule"><span style={{ fontWeight: 600 }}>Inactive (no visits)</span><span className="faint" style={{ fontSize: 12 }}>Available once attendance ships in Phase 3</span></div>
+        <NumberRule label="No gym visit in" k="inactiveDays" rules={rules} setRules={setRules} suffix="days" />
+        <NumberRule label="Visits in last 30 days at least" k="minVisits30d" rules={rules} setRules={setRules} />
+        <NumberRule label="Visits in last 30 days at most" k="maxVisits30d" rules={rules} setRules={setRules} />
         <div className="section-label">Profile</div>
         <div className="rule"><span style={{ fontWeight: 600 }}>Gender</span>
           <div className="chips">{['female', 'male', 'other'].map((g) => <button type="button" key={g} className={`chip ${rules.genders?.includes(g) ? 'on' : ''}`} onClick={() => toggleIn('genders', g)} style={{ textTransform: 'capitalize' }}>{g}</button>)}</div>

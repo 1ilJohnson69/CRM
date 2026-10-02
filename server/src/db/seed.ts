@@ -4,6 +4,7 @@ import { hashPassword } from '../lib/auth.js';
 import { DEFAULT_ROLES, PERMISSIONS } from '../lib/permissions.js';
 import { addToDate, round2, today } from '../lib/http.js';
 import { seedCrm } from './seed-crm.js';
+import { seedOps } from './seed-ops.js';
 
 // Deterministic PRNG so every seed produces the same demo data.
 let s = 20261002;
@@ -26,6 +27,7 @@ async function main() {
   if (existing!.n > 0) {
     // Upgrading an existing database: only add data for modules it lacks.
     await seedCrm();
+    await seedOps();
     console.log('Core data already present.');
     return;
   }
@@ -260,6 +262,7 @@ async function main() {
     console.log(`Seeded ${N} members, ${plans.length} plans, ${staff.length} staff, ${audits.length} audit entries.`);
   });
   await seedCrm();
+  await seedOps();
 }
 
 main()

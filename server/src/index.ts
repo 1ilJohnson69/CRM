@@ -18,6 +18,9 @@ import { appRouter } from './modules/app/routes.js';
 import { leadsRouter } from './modules/crm/leads.js';
 import { communicationsRouter, followUpsRouter, templatesRouter } from './modules/crm/engagement.js';
 import { segmentsRouter } from './modules/crm/segments.js';
+import { attendanceRouter } from './modules/ops/attendance.js';
+import { classesRouter } from './modules/ops/classes.js';
+import { appointmentsRouter, ptRouter } from './modules/ops/appointments.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -47,6 +50,10 @@ staff.use('/follow-ups', followUpsRouter);
 staff.use('/communications', communicationsRouter);
 staff.use('/templates', templatesRouter);
 staff.use('/segments', segmentsRouter);
+staff.use('/attendance', attendanceRouter);
+staff.use('/classes', classesRouter);
+staff.use('/appointments', appointmentsRouter);
+staff.use('/pt', ptRouter);
 staff.use('/', commonRouter);
 app.use('/api', staff);
 

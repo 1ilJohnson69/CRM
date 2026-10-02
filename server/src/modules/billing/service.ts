@@ -31,6 +31,7 @@ export interface InvoiceItemInput {
   itemType: ItemType;
   description: string;
   membershipId?: string | null;
+  memberPtPackageId?: string | null;
   quantity?: number;
   unitPrice: number;
   discount?: number;
@@ -69,9 +70,9 @@ export async function createInvoice(
   );
   for (const l of lines) {
     await c.query(
-      `INSERT INTO invoice_items (invoice_id, item_type, description, membership_id, quantity, unit_price, discount, tax_rate, tax, amount)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-      [invoice.id, l.itemType, l.description, l.membershipId ?? null, l.quantity, l.unitPrice, l.discount, l.taxRate, l.tax, l.amount],
+      `INSERT INTO invoice_items (invoice_id, item_type, description, membership_id, member_pt_package_id, quantity, unit_price, discount, tax_rate, tax, amount)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+      [invoice.id, l.itemType, l.description, l.membershipId ?? null, l.memberPtPackageId ?? null, l.quantity, l.unitPrice, l.discount, l.taxRate, l.tax, l.amount],
     );
   }
   if (total === 0) await activateInvoiceMemberships(c, invoice.id);
@@ -169,8 +170,14 @@ export async function recordPayment(c: PoolClient, req: Request, input: PaymentI
   return { ...payment, invoice_status: status };
 }
 
-/** Pending memberships on an invoice go live once any amount is collected. */
+/** Pending memberships and PT packages on an invoice go live once any amount is collected. */
 async function activateInvoiceMemberships(c: PoolClient, invoiceId: string) {
+  await c.query(
+    `UPDATE member_pt_packages SET status = 'active'
+      WHERE status = 'pending'
+        AND id IN (SELECT member_pt_package_id FROM invoice_items WHERE invoice_id = $1 AND member_pt_package_id IS NOT NULL)`,
+    [invoiceId],
+  );
   const res = await c.query(
     `UPDATE memberships SET status = 'active', updated_at = now()
       WHERE status = 'pending'
@@ -200,6 +207,11 @@ export async function voidPayment(c: PoolClient, req: Request, paymentId: string
     await c.query(
       `UPDATE memberships SET status = 'pending', updated_at = now()
         WHERE status = 'active' AND id IN (SELECT membership_id FROM invoice_items WHERE invoice_id = $1 AND membership_id IS NOT NULL)`,
+      [payment.invoice_id],
+    );
+    await c.query(
+      `UPDATE member_pt_packages SET status = 'pending'
+        WHERE status = 'active' AND id IN (SELECT member_pt_package_id FROM invoice_items WHERE invoice_id = $1 AND member_pt_package_id IS NOT NULL)`,
       [payment.invoice_id],
     );
   }

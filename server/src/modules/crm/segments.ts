@@ -30,6 +30,9 @@ export const segmentRules = z
     ageMin: z.number().int().min(0).max(120).optional(),
     ageMax: z.number().int().min(0).max(120).optional(),
     birthdayThisMonth: z.boolean().optional(),
+    inactiveDays: z.number().int().min(1).max(3650).optional(),
+    minVisits30d: z.number().int().min(0).max(100).optional(),
+    maxVisits30d: z.number().int().min(0).max(100).optional(),
   })
   .strict();
 export type SegmentRules = z.infer<typeof segmentRules>;
@@ -75,6 +78,14 @@ export function compileRules(rules: SegmentRules, params: unknown[]): string[] {
   if (rules.ageMin !== undefined) where.push(`m.date_of_birth <= current_date - make_interval(years => ${p(rules.ageMin)}::int)`);
   if (rules.ageMax !== undefined) where.push(`m.date_of_birth > current_date - make_interval(years => ${p(rules.ageMax)}::int + 1)`);
   if (rules.birthdayThisMonth) where.push(`extract(month FROM m.date_of_birth) = extract(month FROM current_date)`);
+  if (rules.inactiveDays !== undefined) {
+    where.push(`COALESCE((SELECT max(a.checked_in_at) FROM attendance a WHERE a.member_id = m.id AND a.status <> 'denied'), m.join_date::timestamptz) < now() - make_interval(days => ${p(rules.inactiveDays)}::int)`);
+  }
+  if (rules.minVisits30d !== undefined || rules.maxVisits30d !== undefined) {
+    const visits = `(SELECT count(*) FROM attendance a WHERE a.member_id = m.id AND a.status <> 'denied' AND a.checked_in_at >= now() - interval '30 days')`;
+    if (rules.minVisits30d !== undefined) where.push(`${visits} >= ${p(rules.minVisits30d)}`);
+    if (rules.maxVisits30d !== undefined) where.push(`${visits} <= ${p(rules.maxVisits30d)}`);
+  }
   return where;
 }
 

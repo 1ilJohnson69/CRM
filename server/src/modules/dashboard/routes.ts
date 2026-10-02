@@ -10,7 +10,7 @@ const pct = (now: number, before: number) => (before ? Math.round(((now - before
 dashboardRouter.get('/summary', can('dashboard.view'), async (req, res) => {
   const scope = [auth(req).orgId, branchScope(req)];
 
-  const [active, activeSeries, revenue, revenueSeries, joins, joinSeries, renewals, outstanding, leads, leadSeries] = await Promise.all([
+  const [active, activeSeries, revenue, revenueSeries, joins, joinSeries, renewals, outstanding, leads, leadSeries, visits, visitSeries] = await Promise.all([
     one(
       `SELECT count(*) FILTER (WHERE cm.status IN ('active','expiring_soon')) AS active,
               count(*) FILTER (WHERE cm.status = 'frozen') AS frozen
@@ -85,6 +85,18 @@ dashboardRouter.get('/summary', can('dashboard.view'), async (req, res) => {
          FROM generate_series(current_date - 56, current_date, interval '7 days') d ORDER BY d`,
       scope,
     ),
+    one(
+      `SELECT count(*) FILTER (WHERE checked_in_at >= current_date) AS today,
+              count(*) FILTER (WHERE checked_in_at >= current_date - 7 AND checked_in_at < now() - interval '7 days') AS same_time_last_week
+         FROM attendance WHERE organization_id = $1 AND branch_id = ANY($2) AND status <> 'denied' AND checked_in_at >= current_date - 7`,
+      scope,
+    ),
+    query(
+      `SELECT d::date AS date, (SELECT count(*) FROM attendance a WHERE a.organization_id = $1 AND a.branch_id = ANY($2) AND a.status <> 'denied'
+                                  AND a.checked_in_at >= d AND a.checked_in_at < d + interval '1 day') AS value
+         FROM generate_series(current_date - 13, current_date, interval '1 day') d ORDER BY d`,
+      scope,
+    ),
   ]);
 
   const activeValues = activeSeries.map((r) => Number(r.value));
@@ -114,6 +126,11 @@ dashboardRouter.get('/summary', can('dashboard.view'), async (req, res) => {
         ? Math.round((Number(leads!.won_90) / (Number(leads!.won_90) + Number(leads!.lost_90))) * 1000) / 10
         : 0,
       series: leadSeries.map((r) => Number(r.value)),
+    },
+    todayAttendance: {
+      value: Number(visits!.today),
+      change: pct(Number(visits!.today), Number(visits!.same_time_last_week)),
+      series: visitSeries.map((r) => Number(r.value)),
     },
     renewalsDue: { value: Number(renewals!.week), today: Number(renewals!.today), atStake: renewals!.week_value },
     outstanding: { value: outstanding!.amount, invoices: Number(outstanding!.invoices) },
@@ -283,4 +300,33 @@ dashboardRouter.get('/pipeline', can('dashboard.view', 'leads.read'), async (req
     trials: { booked: f.trials, won: f.trials_won },
     sources: sources.map((s) => ({ source: s.source, leads: Number(s.leads), won: Number(s.won) })),
   });
+});
+
+dashboardRouter.get('/today', can('dashboard.view'), async (req, res) => {
+  const scope = [auth(req).orgId, branchScope(req)];
+  const [classes, appointments] = await Promise.all([
+    auth(req).permissions.has('classes.read')
+      ? query(
+          `SELECT cs.id, cs.starts_at, cs.ends_at, cs.capacity, cs.status, ct.name AS class_name, tu.full_name AS trainer_name, b.name AS branch_name,
+                  (SELECT count(*) FROM class_bookings cb WHERE cb.session_id = cs.id AND cb.status IN ('booked','attended','no_show'))::int AS booked,
+                  (SELECT count(*) FROM class_bookings cb WHERE cb.session_id = cs.id AND cb.status = 'waitlisted')::int AS waitlisted
+             FROM class_sessions cs JOIN class_types ct ON ct.id = cs.class_type_id JOIN branches b ON b.id = cs.branch_id
+             LEFT JOIN users tu ON tu.id = cs.trainer_id
+            WHERE cs.organization_id = $1 AND cs.branch_id = ANY($2) AND cs.starts_at >= current_date AND cs.starts_at < current_date + 1
+            ORDER BY cs.starts_at`,
+          scope,
+        )
+      : [],
+    auth(req).permissions.has('appointments.read')
+      ? query(
+          `SELECT a.*, su.full_name AS staff_name, COALESCE(mu.full_name, l.full_name) AS client_name
+             FROM appointments a LEFT JOIN users su ON su.id = a.staff_id LEFT JOIN members m ON m.id = a.member_id
+             LEFT JOIN users mu ON mu.id = m.user_id LEFT JOIN leads l ON l.id = a.lead_id
+            WHERE a.organization_id = $1 AND a.branch_id = ANY($2) AND a.starts_at >= current_date AND a.starts_at < current_date + 1 AND a.status <> 'cancelled'
+            ORDER BY a.starts_at`,
+          scope,
+        )
+      : [],
+  ]);
+  res.json({ classes, appointments });
 });

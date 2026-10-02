@@ -20,6 +20,11 @@ import { LeadsPage } from './features/crm/LeadsPage';
 import { FollowUpsPage } from './features/crm/FollowUpsPage';
 import { SegmentDetail, SegmentsPage } from './features/crm/SegmentsPage';
 import { CommunicationPage } from './features/crm/CommunicationPage';
+import { FrontDeskPage } from './features/ops/FrontDeskPage';
+import { AttendancePage } from './features/ops/AttendancePage';
+import { ClassesPage } from './features/ops/ClassesPage';
+import { AppointmentsPage } from './features/ops/AppointmentsPage';
+import { PtPage } from './features/ops/PtPage';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -53,6 +58,11 @@ function App() {
         <Route path="segments" element={<Guard perm="members.read"><SegmentsPage /></Guard>} />
         <Route path="segments/:id" element={<Guard perm="members.read"><SegmentDetail /></Guard>} />
         <Route path="communication" element={<Guard perm="communications.log"><CommunicationPage /></Guard>} />
+        <Route path="front-desk" element={<Guard perm="attendance.checkin"><FrontDeskPage /></Guard>} />
+        <Route path="attendance" element={<Guard perm="attendance.read"><AttendancePage /></Guard>} />
+        <Route path="classes" element={<Guard perm="classes.read"><ClassesPage /></Guard>} />
+        <Route path="appointments" element={<Guard perm="appointments.read"><AppointmentsPage /></Guard>} />
+        <Route path="pt" element={<Guard perm="appointments.read"><PtPage /></Guard>} />
         <Route path="memberships" element={<Guard perm="plans.read"><MembershipsPage /></Guard>} />
         <Route path="payments" element={<Guard perm="payments.read"><PaymentsPage /></Guard>} />
         <Route path="invoices" element={<Guard perm="invoices.read"><InvoicesPage /></Guard>} />

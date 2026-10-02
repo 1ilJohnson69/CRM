@@ -44,13 +44,14 @@ membersRouter.get('/', can('members.read'), async (req, res) => {
   const rows = await query(
     `SELECT m.id, m.member_code, u.full_name, u.phone, u.email, u.avatar_url, m.gender, m.join_date,
             b.name AS branch_name, cm.plan_name, cm.status, cm.end_date, cm.days_remaining,
-            bal.outstanding, bal.lifetime_value, su.full_name AS assigned_staff,
+            bal.outstanding, bal.lifetime_value, su.full_name AS assigned_staff, vs.last_visit_at, vs.visits_30d,
             count(*) OVER() AS total_count
        FROM members m
        JOIN users u ON u.id = m.user_id
        JOIN branches b ON b.id = m.branch_id
        JOIN member_current_membership cm ON cm.member_id = m.id
        JOIN member_balances bal ON bal.member_id = m.id
+       JOIN member_visit_stats vs ON vs.member_id = m.id
        LEFT JOIN users su ON su.id = m.assigned_staff_id
       WHERE ${where.join(' AND ')}
       ORDER BY ${order}
@@ -84,7 +85,7 @@ membersRouter.get('/:id', can('members.read'), async (req, res) => {
   const member = await loadMember(req, id);
   const [current, balance, stats, sessions, origin] = await Promise.all([
     one(`SELECT * FROM member_current_membership WHERE member_id = $1`, [id]),
-    one(`SELECT * FROM member_balances WHERE member_id = $1`, [id]),
+    one(`SELECT b.*, v.last_visit_at, v.visits_30d, v.visits_total FROM member_balances b JOIN member_visit_stats v ON v.member_id = b.member_id WHERE b.member_id = $1`, [id]),
     one(
       `SELECT count(*) FILTER (WHERE status = 'recorded') AS payment_count,
               max(paid_at) FILTER (WHERE status = 'recorded') AS last_payment_at
@@ -164,6 +165,18 @@ membersRouter.get('/:id/memberships', can('members.read'), async (req, res) => {
       [id],
     ),
   );
+});
+
+membersRouter.get('/:id/classes', can('members.read'), async (req, res) => {
+  const id = uuid.parse(req.params.id);
+  await loadMember(req, id);
+  res.json(await query(
+    `SELECT cb.id, cb.session_id, cb.status, cb.source, cb.created_at, cs.starts_at, ct.name AS class_name, tu.full_name AS trainer_name
+       FROM class_bookings cb JOIN class_sessions cs ON cs.id = cb.session_id JOIN class_types ct ON ct.id = cs.class_type_id
+       LEFT JOIN users tu ON tu.id = cs.trainer_id
+      WHERE cb.member_id = $1 ORDER BY cs.starts_at DESC LIMIT 100`,
+    [id],
+  ));
 });
 
 membersRouter.get('/:id/activity', can('members.read'), async (req, res) => {

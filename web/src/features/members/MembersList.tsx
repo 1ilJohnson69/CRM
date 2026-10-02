@@ -5,7 +5,7 @@ import { Search, UserPlus, Users } from 'lucide-react';
 import { api, type Paged } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useDebounced } from '../../lib/ui';
-import { date, daysLabel, money } from '../../lib/format';
+import { date, daysLabel, money, relative } from '../../lib/format';
 import { Button, Empty, Pagination, Person, Skeleton, StatusBadge } from '../../components/ui';
 import { useActions } from '../actions';
 
@@ -69,7 +69,7 @@ export function MembersList() {
             <Empty icon={<Users size={20} />} title="No members match">Try a different search or filter.</Empty>
           ) : (
             <table className="tbl">
-              <thead><tr><th>Member</th><th>Phone</th><th>Plan</th><th>Status</th><th>Expiry</th><th className="r">Dues</th><th className="r hide-sm">Lifetime value</th><th className="hide-sm">Branch</th><th className="hide-sm">Joined</th></tr></thead>
+              <thead><tr><th>Member</th><th>Phone</th><th>Plan</th><th>Status</th><th>Expiry</th><th className="r">Dues</th><th className="r hide-sm">Lifetime value</th><th className="hide-sm">Last visit</th><th className="hide-sm">Branch</th><th className="hide-sm">Joined</th></tr></thead>
               <tbody>
                 {data.data.map((m) => (
                   <tr key={m.id} className="clickable" onClick={() => navigate(`/members/${m.id}`)}>
@@ -80,6 +80,7 @@ export function MembersList() {
                     <td>{m.end_date ? <><div>{date(m.end_date)}</div><div className="faint" style={{ fontSize: 12 }}>{daysLabel(m.days_remaining)}</div></> : '—'}</td>
                     <td className="r amount" style={{ color: m.outstanding > 0 ? 'var(--warning)' : 'var(--text-3)' }}>{m.outstanding > 0 ? money(m.outstanding) : '—'}</td>
                     <td className="r num hide-sm">{money(m.lifetime_value)}</td>
+                    <td className="muted hide-sm" style={{ whiteSpace: 'nowrap' }}>{m.last_visit_at ? relative(m.last_visit_at) : 'Never'}</td>
                     <td className="muted hide-sm">{m.branch_name}</td>
                     <td className="muted hide-sm">{date(m.join_date)}</td>
                   </tr>

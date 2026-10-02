@@ -205,3 +205,91 @@ export function Donut({ segments, size = 168, thickness = 16, center }: {
     </div>
   );
 }
+
+// ------------------------------------------------------------------- bars --
+
+export function Bars({ data, height = 180, label, valueLabel, highlightLast = true }: {
+  data: { key: string; value: number }[]; height?: number; label: (key: string, i: number) => string; valueLabel: (v: number) => string; highlightLast?: boolean;
+}) {
+  const [ref, width] = useWidth<HTMLDivElement>();
+  const [hover, setHover] = useState<number | null>(null);
+  const pad = { t: 10, r: 4, b: 22, l: 34 };
+  const w = width - pad.l - pad.r;
+  const h = height - pad.t - pad.b;
+  const max = niceMax(Math.max(1, ...data.map((d) => d.value)) * 1.05);
+  const gap = data.length > 40 ? 1 : 2;
+  const bw = Math.max(2, w / data.length - gap);
+  const every = Math.max(1, Math.ceil(data.length / Math.max(2, Math.floor(w / 60))));
+  const avg = data.reduce((s, d) => s + d.value, 0) / Math.max(1, data.length);
+  return (
+    <div className="chart" ref={ref}>
+      <svg width={width} height={height} role="img" aria-label="Daily values">
+        <g className="axis">
+          {[0, 0.5, 1].map((t) => (
+            <g key={t}>
+              <line className="grid-line" x1={pad.l} x2={width - pad.r} y1={pad.t + h - t * h} y2={pad.t + h - t * h} />
+              <text x={pad.l - 8} y={pad.t + h - t * h + 4} textAnchor="end">{Math.round(t * max)}</text>
+            </g>
+          ))}
+          {data.map((d, i) => (i % every === 0 ? <text key={d.key} x={pad.l + i * (bw + gap) + bw / 2} y={height - 6} textAnchor="middle">{label(d.key, i)}</text> : null))}
+        </g>
+        <line x1={pad.l} x2={width - pad.r} y1={pad.t + h - (avg / max) * h} y2={pad.t + h - (avg / max) * h} stroke="var(--text-3)" strokeDasharray="3 4" />
+        {data.map((d, i) => {
+          const bh = Math.max(d.value ? 2 : 0, (d.value / max) * h);
+          const x = pad.l + i * (bw + gap);
+          const last = highlightLast && i === data.length - 1;
+          return (
+            <g key={d.key} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+              <rect x={x - gap / 2} y={pad.t} width={bw + gap} height={h} fill="transparent" />
+              <path d={`M${x},${pad.t + h} v${-Math.max(0, bh - 3)} q0,-3 3,-3 h${Math.max(0, bw - 6)} q3,0 3,3 v${Math.max(0, bh - 3)} z`}
+                fill={last ? 'var(--gold-2)' : 'var(--series-1)'} opacity={hover === null || hover === i ? (last ? 1 : 0.75) : 0.35} />
+            </g>
+          );
+        })}
+      </svg>
+      {hover !== null && (
+        <div className="tooltip" style={{ left: Math.min(Math.max(pad.l + hover * (bw + gap) + bw / 2, 90), width - 90), top: pad.t + h - (data[hover].value / max) * h }}>
+          <div className="tt-title">{label(data[hover].key, -1)}</div>
+          <div className="tt-row"><span>{valueLabel(data[hover].value)}</span></div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- heatmap --
+
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/** Weekday × hour intensity, one hue light→dark (sequential). */
+export function Heatmap({ cells, hours = [5, 22] }: { cells: { dow: number; hour: number; avg: number }[]; hours?: [number, number] }) {
+  const [hover, setHover] = useState<{ dow: number; hour: number; avg: number } | null>(null);
+  const hourList = Array.from({ length: hours[1] - hours[0] + 1 }, (_, i) => hours[0] + i);
+  const map = new Map(cells.map((c) => [`${c.dow}:${c.hour}`, c.avg]));
+  const max = Math.max(1, ...cells.map((c) => c.avg));
+  const fmtH = (h: number) => (h === 12 ? '12p' : h > 12 ? `${h - 12}p` : `${h}a`);
+  return (
+    <div className="heatmap" style={{ gridTemplateColumns: `34px repeat(${hourList.length}, minmax(14px, 1fr))` }} role="img" aria-label="Average check-ins by day and hour">
+      <span />
+      {hourList.map((h) => <span key={h} className="hm-h">{h % 3 === 0 ? fmtH(h) : ''}</span>)}
+      {DAYS.map((d, di) => (
+        <div key={d} style={{ display: 'contents' }}>
+          <span className="hm-d">{d}</span>
+          {hourList.map((h) => {
+            const v = map.get(`${di + 1}:${h}`) ?? 0;
+            const t = v / max;
+            return (
+              <span key={h} className="hm-c" onMouseEnter={() => setHover({ dow: di + 1, hour: h, avg: v })} onMouseLeave={() => setHover(null)}
+                style={{ background: v ? `color-mix(in srgb, var(--gold-2) ${Math.round(12 + t * 88)}%, var(--surface-2))` : 'var(--surface-2)' }}
+                title={`${d} ${fmtH(h)}: ${v} avg check-ins`} />
+            );
+          })}
+        </div>
+      ))}
+      <div className="hm-foot" style={{ gridColumn: '1 / -1' }}>
+        <span className="faint">{hover ? `${DAYS[hover.dow - 1]} ${fmtH(hover.hour)}–${fmtH(hover.hour + 1)} · ${hover.avg} avg check-ins` : 'Hover a cell for details'}</span>
+        <span className="hm-scale"><span className="faint">Quiet</span>{[0.15, 0.4, 0.65, 0.9].map((t) => <i key={t} style={{ background: `color-mix(in srgb, var(--gold-2) ${Math.round(12 + t * 88)}%, var(--surface-2))` }} />)}<span className="faint">Busy</span></span>
+      </div>
+    </div>
+  );
+}

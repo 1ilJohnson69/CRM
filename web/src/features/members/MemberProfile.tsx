@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowLeft, CalendarClock, CalendarPlus, CreditCard, FileDown, KeyRound, MessageCircle, Pencil, Phone, RefreshCw, Smartphone, Snowflake, Sun, XCircle, Contact,
+  ArrowLeft, CalendarClock, CalendarPlus, DoorOpen, Dumbbell, Users, CreditCard, FileDown, KeyRound, MessageCircle, Pencil, Phone, RefreshCw, Smartphone, Snowflake, Sun, XCircle, Contact,
 } from 'lucide-react';
 import { api, ApiError, openPdf, type Paged } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
@@ -13,9 +13,12 @@ import { useActions } from '../actions';
 import { CredentialsCard } from './MemberForm';
 import { channelIcon, CHANNEL_LABEL, CompleteFollowUpDialog, OUTCOME_LABEL } from '../crm/common';
 import { FollowUpRow } from '../crm/FollowUpsPage';
+import { BookClassDialog, BookingBadge } from '../ops/ClassesPage';
+import { PackageProgress, PkgBadge } from '../ops/PtPage';
+import { AppointmentActions, AppointmentDialog, APPT_LABEL, APPT_STATUS_LABEL, APPT_STATUS_TONE, SellPtDialog } from '../ops/common';
 
-type Tab = 'overview' | 'membership' | 'payments' | 'invoices' | 'followups' | 'communication' | 'app' | 'activity';
-const PLANNED = ['Attendance', 'PT', 'Workout', 'Nutrition', 'Assessments', 'Appointments'];
+type Tab = 'overview' | 'membership' | 'attendance' | 'classes' | 'pt' | 'appointments' | 'payments' | 'invoices' | 'followups' | 'communication' | 'app' | 'activity';
+const PLANNED = ['Workout plans', 'Nutrition plans', 'Body measurements', 'Progress photos'];
 
 function MembershipActionDialog({ kind, membership, onClose }: { kind: 'freeze' | 'extend' | 'cancel'; membership: any; onClose: () => void }) {
   const qc = useQueryClient();
@@ -295,6 +298,111 @@ function CommunicationTab({ m }: { m: any }) {
   );
 }
 
+function AttendanceTab({ m }: { m: any }) {
+  const { data } = useQuery({ queryKey: ['attendance', { memberId: m.id }], queryFn: () => api.get<Paged<any>>('/attendance', { memberId: m.id, pageSize: 100 }) });
+  // Last 12 weeks as a compact visit calendar.
+  const days = Array.from({ length: 84 }, (_, i) => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - 83 + i); return d; });
+  const visited = new Set((data?.data ?? []).filter((a) => a.status !== 'denied').map((a) => new Date(a.checked_in_at).toDateString()));
+  return (
+    <div className="grid g-2">
+      <Card title="Last 12 weeks" icon={<DoorOpen />} sub={`${m.balance?.visits_30d ?? 0} visits in the last 30 days · ${m.balance?.visits_total ?? 0} all time`}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(12, 1fr)', gridAutoFlow: 'column', gridTemplateRows: 'repeat(7, 14px)', gap: 3 }}>
+          {days.map((d) => <span key={d.toISOString()} title={`${d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}${visited.has(d.toDateString()) ? ' · visited' : ''}`}
+            style={{ borderRadius: 3, background: visited.has(d.toDateString()) ? 'var(--gold-2)' : 'var(--surface-3)' }} />)}
+        </div>
+      </Card>
+      <Card title="Check-ins" icon={<DoorOpen />} bodyClass="">
+        {!data ? <div style={{ padding: 20 }}><Skeleton h={200} /></div> : !data.data.length ? <Empty title="No visits yet" /> : (
+          <div className="table-wrap" style={{ maxHeight: 360, overflowY: 'auto', marginTop: 6 }}><table className="tbl"><tbody>{data.data.map((a) => (
+            <tr key={a.id}><td>{dateTime(a.checked_in_at)}</td><td className="muted">{a.checked_out_at ? `out ${new Date(a.checked_out_at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}` : ''}</td>
+              <td>{a.status === 'allowed' ? <span className="badge success">Allowed</span> : <span className={`badge ${a.status === 'override' ? 'warning' : 'danger'}`} title={a.reason}>{a.status === 'override' ? 'Override' : 'Denied'}</span>}</td><td className="muted">{a.branch_name}</td></tr>
+          ))}</tbody></table></div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function ClassesTab({ m }: { m: any }) {
+  const { can } = useAuth();
+  const [booking, setBooking] = useState(false);
+  const { data } = useQuery({ queryKey: ['member-classes', m.id], queryFn: () => api.get<any[]>(`/members/${m.id}/classes`) });
+  return (
+    <Card title="Class bookings" icon={<Users />} actions={can('classes.book') && <Button size="sm" icon={<CalendarPlus />} onClick={() => setBooking(true)}>Book class</Button>} bodyClass="">
+      {!data ? <div style={{ padding: 20 }}><Skeleton h={200} /></div> : !data.length ? <Empty title="No class bookings yet" /> : (
+        <div className="table-wrap" style={{ marginTop: 6 }}><table className="tbl">
+          <thead><tr><th>Class</th><th>When</th><th>Trainer</th><th>Status</th><th>Booked via</th></tr></thead>
+          <tbody>{data.map((b) => (
+            <tr key={b.id}><td style={{ fontWeight: 700 }}><Link to={`/classes?session=${b.session_id}`}>{b.class_name}</Link></td><td className="muted">{dateTime(b.starts_at)}</td><td className="muted">{b.trainer_name ?? '—'}</td><td><BookingBadge status={b.status} /></td><td className="muted">{b.source === 'app' ? 'App' : 'Desk'}</td></tr>
+          ))}</tbody>
+        </table></div>
+      )}
+      {booking && <BookClassDialog memberId={m.id} memberName={m.full_name} onClose={() => setBooking(false)} />}
+    </Card>
+  );
+}
+
+function PtTab({ m }: { m: any }) {
+  const { can } = useAuth();
+  const [selling, setSelling] = useState(false);
+  const [booking, setBooking] = useState<any>(null);
+  const { data } = useQuery({ queryKey: ['pt-packages-of', m.id], queryFn: () => api.get<any[]>('/pt/member-packages', { memberId: m.id }) });
+  const { data: sessions } = useQuery({ queryKey: ['appointments', { memberId: m.id, type: 'pt' }], queryFn: () => api.get<any[]>('/appointments', { memberId: m.id, type: 'pt', limit: 60 }) });
+  return (
+    <div className="stack">
+      <Card title="PT packages" icon={<Dumbbell />} actions={can('pt.sell') && <Button size="sm" variant="primary" icon={<Dumbbell />} onClick={() => setSelling(true)}>Sell PT package</Button>}>
+        {!data ? <Skeleton h={120} /> : !data.length ? <Empty title="No PT packages" /> : (
+          <div className="stack" style={{ gap: 8 }}>{data.map((p) => (
+            <div key={p.id} className="ms-card">
+              <div>
+                <div className="row wrap"><b>{p.package_name}</b><PkgBadge status={p.effective_status} /></div>
+                <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>{p.trainer_name ?? 'No trainer'} · {date(p.starts_on)} – {date(p.expires_on)}</div>
+              </div>
+              {p.effective_status === 'active' && can('appointments.manage') && p.sessions_remaining - p.sessions_booked > 0 && (
+                <Button size="sm" icon={<CalendarPlus />} onClick={() => setBooking({ type: 'pt', memberId: m.id, memberName: m.full_name, memberPtPackageId: p.id, staffId: p.trainer_id ?? undefined })}>Book session</Button>
+              )}
+              <div className="progress"><PackageProgress used={p.sessions_used} booked={p.sessions_booked} total={p.sessions_total} /><div className="faint num" style={{ fontSize: 12, marginTop: 4 }}>{p.sessions_used} used · {p.sessions_booked} booked · {Math.max(0, p.sessions_remaining - p.sessions_booked)} left to book</div></div>
+            </div>
+          ))}</div>
+        )}
+      </Card>
+      <Card title="Sessions" icon={<CalendarClock />} bodyClass="">
+        {!sessions ? <div style={{ padding: 20 }}><Skeleton h={160} /></div> : !sessions.length ? <Empty title="No PT sessions yet" /> : (
+          <div className="table-wrap" style={{ marginTop: 6 }}><table className="tbl">
+            <tbody>{sessions.map((a) => (
+              <tr key={a.id}><td className="muted" style={{ whiteSpace: 'nowrap' }}>{dateTime(a.starts_at)}</td><td>{a.staff_name ?? '—'}</td>
+                <td><span className={`badge ${APPT_STATUS_TONE[a.status]}`}>{APPT_STATUS_LABEL[a.status]}</span></td>
+                <td className="muted" style={{ maxWidth: 320 }}>{a.outcome_notes ?? a.notes ?? ''}</td><td className="r"><AppointmentActions appt={a} /></td></tr>
+            ))}</tbody>
+          </table></div>
+        )}
+      </Card>
+      {selling && <SellPtDialog memberId={m.id} memberName={m.full_name} onClose={() => setSelling(false)} />}
+      {booking && <AppointmentDialog preset={booking} onClose={() => setBooking(null)} />}
+    </div>
+  );
+}
+
+function AppointmentsTab({ m }: { m: any }) {
+  const { can } = useAuth();
+  const [booking, setBooking] = useState(false);
+  const { data } = useQuery({ queryKey: ['appointments', { memberId: m.id }], queryFn: () => api.get<any[]>('/appointments', { memberId: m.id, limit: 100 }) });
+  return (
+    <Card title="Appointments" icon={<CalendarClock />} actions={can('appointments.manage') && <Button size="sm" icon={<CalendarPlus />} onClick={() => setBooking(true)}>Book</Button>} bodyClass="">
+      {!data ? <div style={{ padding: 20 }}><Skeleton h={200} /></div> : !data.length ? <Empty title="No appointments yet" /> : (
+        <div className="table-wrap" style={{ marginTop: 6 }}><table className="tbl">
+          <thead><tr><th>When</th><th>Type</th><th>With</th><th>Status</th><th>Notes</th><th /></tr></thead>
+          <tbody>{data.map((a) => (
+            <tr key={a.id}><td className="muted" style={{ whiteSpace: 'nowrap' }}>{dateTime(a.starts_at)}</td><td style={{ fontWeight: 700 }}>{APPT_LABEL[a.type]}</td><td className="muted">{a.staff_name ?? '—'}</td>
+              <td><span className={`badge ${APPT_STATUS_TONE[a.status]}`}>{APPT_STATUS_LABEL[a.status]}</span></td><td className="muted">{a.outcome_notes ?? a.notes ?? ''}</td><td className="r"><AppointmentActions appt={a} /></td></tr>
+          ))}</tbody>
+        </table></div>
+      )}
+      {booking && <AppointmentDialog preset={{ memberId: m.id, memberName: m.full_name, type: 'assessment' }} onClose={() => setBooking(false)} />}
+    </Card>
+  );
+}
+
 export function MemberProfile() {
   const { id } = useParams();
   const { can } = useAuth();
@@ -328,11 +436,13 @@ export function MemberProfile() {
             <div className="fact"><div className="k">Expiry</div><div className="v">{cm?.end_date ? date(cm.end_date) : '—'}</div><div className="faint" style={{ fontSize: 12 }}>{cm?.end_date ? daysLabel(cm.days_remaining) : ''}</div></div>
             <div className="fact"><div className="k">Outstanding</div><div className="v" style={{ color: due > 0 ? 'var(--warning)' : undefined }}>{money(due)}</div></div>
             <div className="fact"><div className="k">Lifetime value</div><div className="v gold-text">{money(m.balance?.lifetime_value)}</div></div>
+            <div className="fact"><div className="k">Last visit</div><div className="v">{m.balance?.last_visit_at ? relative(m.balance.last_visit_at) : 'Never'}</div><div className="faint" style={{ fontSize: 12 }}>{m.balance?.visits_30d ?? 0} visits / 30d</div></div>
           </div>
         </div>
       </section>
       <Tabs<Tab> value={tab} onChange={setTab} tabs={[
-        { key: 'overview', label: 'Overview' }, { key: 'membership', label: 'Membership' }, { key: 'payments', label: 'Payments' },
+        { key: 'overview', label: 'Overview' }, { key: 'membership', label: 'Membership' }, { key: 'attendance', label: 'Attendance' },
+        { key: 'classes', label: 'Classes' }, { key: 'pt', label: 'PT' }, { key: 'appointments', label: 'Appointments' }, { key: 'payments', label: 'Payments' },
         { key: 'invoices', label: 'Invoices' }, { key: 'followups', label: 'Follow-ups' }, { key: 'communication', label: 'Communication' },
         { key: 'app', label: 'App account' }, { key: 'activity', label: 'Activity' },
       ]} />
@@ -340,6 +450,10 @@ export function MemberProfile() {
       {tab === 'membership' && <MembershipTab m={m} />}
       {tab === 'payments' && <PaymentsTab m={m} />}
       {tab === 'invoices' && <InvoicesTab m={m} />}
+      {tab === 'attendance' && <AttendanceTab m={m} />}
+      {tab === 'classes' && <ClassesTab m={m} />}
+      {tab === 'pt' && <PtTab m={m} />}
+      {tab === 'appointments' && <AppointmentsTab m={m} />}
       {tab === 'followups' && <FollowUpsTab m={m} />}
       {tab === 'communication' && <CommunicationTab m={m} />}
       {tab === 'app' && <AppTab m={m} />}
