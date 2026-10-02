@@ -15,7 +15,7 @@ member's app) updates in the same database transaction.
      web/ (Admin CRM)      /api/me (Member App)
 ```
 
-## Status: Phases 1–3 (Core, CRM, Gym operations) — complete
+## Status: Phases 1–4 (Core, CRM, Gym operations, Fitness) — complete
 
 | Module | Backend | CRM UI |
 |---|---|---|
@@ -61,8 +61,22 @@ member's app) updates in the same database transaction.
 | Automation | Sessions generated daily; finished classes closed; members with no visit in 14 days get a win-back follow-up; members are reminded 24h before classes and appointments |
 | Segments | New rules: no visit in N days, visits in the last 30 days |
 
-Phases 4–6 (fitness, POS, inventory, marketing…) appear in the sidebar
-marked `P4`–`P6` so the full product map is visible.
+### Phase 4 — Fitness
+
+| Module | What it does |
+|---|---|
+| Exercise library | Organisation-wide exercises with category, muscles, equipment, cues and an optional demo link; usage count per exercise |
+| Workout plans | Templates built once, then copied to a member and tailored. Days with exercises (sets, reps, weight, rest, notes) and reordering. One active plan per member: assigning a new one completes the previous plan. Adherence is logged sessions against prescribed days |
+| Workout logs | Members log sessions in the app (`POST /me/workout-logs`); trainers can log on their behalf. Each entry records duration, RPE and notes |
+| Nutrition plans | Calorie, macro and water targets, meals with foods and macros, do and avoid lists, restrictions. Live totals against targets and the energy split (4/4/9 kcal per gram) |
+| Assessments | Weight, body fat, muscle, BMI (generated column), circumferences, resting HR, BP and fitness tests. Height carries forward. BMR uses Mifflin–St Jeor. Corrections are audited. Recording one completes the linked assessment appointment |
+| Progress | Tiles show the change since the first assessment, judged against the member's goal; there are trend charts with a target line, and an assessment history |
+| Progress photos | JPEG, PNG or WebP only, checked by magic bytes, 6 MB maximum. Stored outside the web root (`UPLOAD_DIR`) and served only through authorised routes to the member and staff in their branch |
+| Member profile | Fitness, Workout and Nutrition tabs (`?tab=` deep links). A fitness profile records goal, level, diet, injuries and the assigned trainer and nutritionist |
+| Automation | The trainer is notified 3 days before a member's plan ends, once per plan. Members are notified when their plan is assigned or updated. Members with no assessment within the gym's re-test interval (`assessment_interval_days`, default 60) appear in the "due" list |
+
+Phases 5–6 (POS, inventory, marketing…) appear in the sidebar
+marked `P5`–`P6` so the full product map is visible.
 They are not wired to fake data.
 
 Sending through a provider (WhatsApp Business API, SMS gateway, email) is
@@ -147,6 +161,13 @@ GET/POST /appointments   PATCH /appointments/:id   POST /appointments/:id/comple
 GET/POST /pt/packages   PUT /pt/packages/:id   GET/POST /pt/member-packages   PATCH /pt/member-packages/:id   POST /pt/member-packages/:id/cancel
 GET /pt/trainers   PUT /pt/trainers/:id
 
+GET/POST /fitness/exercises   PUT /fitness/exercises/:id   GET /fitness/overview?mine
+GET/POST /fitness/workout-plans|nutrition-plans   GET/PUT /fitness/{kind}-plans/:id
+POST /fitness/{kind}-plans/:id/assign|save-as-template|status   POST /fitness/workout-plans/:id/logs
+GET /fitness/members/:id/summary   PUT /fitness/members/:id/profile
+GET/POST /fitness/assessments   PUT /fitness/assessments/:id
+POST /fitness/members/:id/photos?angle=  (raw image body)   GET/DELETE /fitness/photos/:id
+
 GET /search?q=         GET /notifications      POST /notifications/read
 GET /access/check?code=
 
@@ -156,6 +177,7 @@ GET/PUT /admin/organization                   GET /admin/audit-logs
 # Member App
 GET /me   GET /me/memberships|payments|invoices|notifications|attendance|classes|pt|appointments|checkin-code
 GET /me/invoices/:id/pdf   POST /me/classes/:sessionId/book   POST /me/bookings/:id/cancel
+GET /me/workout|nutrition|progress   POST /me/workout-logs   POST /me/photos   GET /me/photos/:id
 ```
 
 ## Layout

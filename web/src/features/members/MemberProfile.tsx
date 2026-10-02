@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowLeft, CalendarClock, CalendarPlus, DoorOpen, Dumbbell, Users, CreditCard, FileDown, KeyRound, MessageCircle, Pencil, Phone, RefreshCw, Smartphone, Snowflake, Sun, XCircle, Contact,
@@ -15,10 +15,10 @@ import { channelIcon, CHANNEL_LABEL, CompleteFollowUpDialog, OUTCOME_LABEL } fro
 import { FollowUpRow } from '../crm/FollowUpsPage';
 import { BookClassDialog, BookingBadge } from '../ops/ClassesPage';
 import { PackageProgress, PkgBadge } from '../ops/PtPage';
+import { FitnessTab, NutritionTab, WorkoutTab } from '../fitness/MemberFitness';
 import { AppointmentActions, AppointmentDialog, APPT_LABEL, APPT_STATUS_LABEL, APPT_STATUS_TONE, SellPtDialog } from '../ops/common';
 
-type Tab = 'overview' | 'membership' | 'attendance' | 'classes' | 'pt' | 'appointments' | 'payments' | 'invoices' | 'followups' | 'communication' | 'app' | 'activity';
-const PLANNED = ['Workout plans', 'Nutrition plans', 'Body measurements', 'Progress photos'];
+type Tab = 'overview' | 'membership' | 'fitness' | 'workout' | 'nutrition' | 'attendance' | 'classes' | 'pt' | 'appointments' | 'payments' | 'invoices' | 'followups' | 'communication' | 'app' | 'activity';
 
 function MembershipActionDialog({ kind, membership, onClose }: { kind: 'freeze' | 'extend' | 'cancel'; membership: any; onClose: () => void }) {
   const qc = useQueryClient();
@@ -97,9 +97,6 @@ function Overview({ m, onTab }: { m: any; onTab: (t: Tab) => void }) {
             ))}</tbody>
           </table>
         )}
-      </Card>
-      <Card title="Coming to this profile" icon={<CalendarPlus />} sub="These tabs light up as each phase ships, using this same member record.">
-        <div className="chips">{PLANNED.map((p) => <span key={p} className="chip" style={{ cursor: 'default' }}>{p}</span>)}</div>
       </Card>
     </div>
   );
@@ -407,7 +404,9 @@ export function MemberProfile() {
   const { id } = useParams();
   const { can } = useAuth();
   const actions = useActions();
-  const [tab, setTab] = useState<Tab>('overview');
+  const [params, setParams] = useSearchParams();
+  const tab = (params.get('tab') as Tab) ?? 'overview';
+  const setTab = (t: Tab) => setParams(t === 'overview' ? {} : { tab: t }, { replace: true });
   const { data: m, error } = useQuery({ queryKey: ['member', id], queryFn: () => api.get<any>(`/members/${id}`) });
   if (error) return <div className="page"><Empty title="Member not found"><Link to="/members" className="btn">Back to members</Link></Empty></div>;
   if (!m) return <div className="page"><Skeleton h={120} /><Skeleton h={320} /></div>;
@@ -442,12 +441,16 @@ export function MemberProfile() {
       </section>
       <Tabs<Tab> value={tab} onChange={setTab} tabs={[
         { key: 'overview', label: 'Overview' }, { key: 'membership', label: 'Membership' }, { key: 'attendance', label: 'Attendance' },
+        ...(can('assessments.read') ? [{ key: 'fitness' as Tab, label: 'Fitness' }] : []), ...(can('workouts.read') ? [{ key: 'workout' as Tab, label: 'Workout' }] : []), ...(can('nutrition.read') ? [{ key: 'nutrition' as Tab, label: 'Nutrition' }] : []),
         { key: 'classes', label: 'Classes' }, { key: 'pt', label: 'PT' }, { key: 'appointments', label: 'Appointments' }, { key: 'payments', label: 'Payments' },
         { key: 'invoices', label: 'Invoices' }, { key: 'followups', label: 'Follow-ups' }, { key: 'communication', label: 'Communication' },
         { key: 'app', label: 'App account' }, { key: 'activity', label: 'Activity' },
       ]} />
       {tab === 'overview' && <Overview m={m} onTab={setTab} />}
       {tab === 'membership' && <MembershipTab m={m} />}
+      {tab === 'fitness' && <FitnessTab m={m} />}
+      {tab === 'workout' && <WorkoutTab m={m} />}
+      {tab === 'nutrition' && <NutritionTab m={m} />}
       {tab === 'payments' && <PaymentsTab m={m} />}
       {tab === 'invoices' && <InvoicesTab m={m} />}
       {tab === 'attendance' && <AttendanceTab m={m} />}

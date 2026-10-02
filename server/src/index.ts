@@ -21,6 +21,7 @@ import { segmentsRouter } from './modules/crm/segments.js';
 import { attendanceRouter } from './modules/ops/attendance.js';
 import { classesRouter } from './modules/ops/classes.js';
 import { appointmentsRouter, ptRouter } from './modules/ops/appointments.js';
+import { fitnessRouter } from './modules/fitness/routes.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -54,6 +55,7 @@ staff.use('/attendance', attendanceRouter);
 staff.use('/classes', classesRouter);
 staff.use('/appointments', appointmentsRouter);
 staff.use('/pt', ptRouter);
+staff.use('/fitness', fitnessRouter);
 staff.use('/', commonRouter);
 app.use('/api', staff);
 

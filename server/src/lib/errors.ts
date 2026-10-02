@@ -36,6 +36,15 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     res.status(err.status).json({ error: { code: err.code, message: err.message, details: err.details } });
     return;
   }
+  // Body-parser failures (oversized uploads, malformed JSON) are client errors.
+  if (err?.type === 'entity.too.large') {
+    res.status(413).json({ error: { code: 'too_large', message: 'That file is too large' } });
+    return;
+  }
+  if (err?.type === 'entity.parse.failed') {
+    res.status(400).json({ error: { code: 'bad_request', message: 'Malformed request body' } });
+    return;
+  }
   // Postgres unique violation
   if (err?.code === '23505') {
     res.status(409).json({ error: { code: 'conflict', message: uniqueMessage(err.constraint) } });

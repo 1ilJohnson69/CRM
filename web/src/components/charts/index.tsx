@@ -293,3 +293,70 @@ export function Heatmap({ cells, hours = [5, 22] }: { cells: { dow: number; hour
     </div>
   );
 }
+
+// ------------------------------------------------------------- line (1 series) --
+
+/** One metric over time; pair several as small multiples rather than sharing an axis. */
+export function MetricLine({ points, height = 150, format, target, color = 'var(--series-1)', better = 'down' }: {
+  points: { date: string; value: number }[]; height?: number; format: (v: number) => string; target?: number | null; color?: string; better?: 'up' | 'down';
+}) {
+  const [ref, width] = useWidth<HTMLDivElement>();
+  const [hover, setHover] = useState<number | null>(null);
+  const pad = { t: 12, r: 10, b: 22, l: 40 };
+  const w = width - pad.l - pad.r;
+  const h = height - pad.t - pad.b;
+  if (points.length === 0) return <div ref={ref} className="faint" style={{ height, display: 'grid', placeItems: 'center', fontSize: 12.5 }}>No data yet</div>;
+  const vals = points.map((p) => p.value).concat(target != null ? [target] : []);
+  let lo = Math.min(...vals);
+  let hi = Math.max(...vals);
+  const span = hi - lo || Math.max(1, Math.abs(hi) * 0.1);
+  lo -= span * 0.15;
+  hi += span * 0.15;
+  const t0 = Date.parse(points[0].date);
+  const t1 = Date.parse(points.at(-1)!.date);
+  const x = (d: string) => pad.l + (points.length === 1 ? w / 2 : ((Date.parse(d) - t0) / Math.max(1, t1 - t0)) * w);
+  const y = (v: number) => pad.t + h - ((v - lo) / (hi - lo)) * h;
+  const pts = points.map((p) => [x(p.date), y(p.value)] as [number, number]);
+  const ticks = [lo + (hi - lo) * 0.15, (lo + hi) / 2, hi - (hi - lo) * 0.15];
+  const first = points[0].value;
+  const last = points.at(-1)!.value;
+  const improving = better === 'down' ? last < first : last > first;
+  const fmtDate = (d: string) => new Date(`${d}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  return (
+    <div className="chart" ref={ref}>
+      <svg width={width} height={height} role="img" aria-label={`From ${format(first)} to ${format(last)}`}>
+        <g className="axis">
+          {ticks.map((t, i) => (
+            <g key={i}>
+              <line className="grid-line" x1={pad.l} x2={width - pad.r} y1={y(t)} y2={y(t)} />
+              <text x={pad.l - 6} y={y(t) + 4} textAnchor="end">{format(t)}</text>
+            </g>
+          ))}
+          <text x={pad.l} y={height - 6} textAnchor="start">{fmtDate(points[0].date)}</text>
+          {points.length > 1 && <text x={width - pad.r} y={height - 6} textAnchor="end">{fmtDate(points.at(-1)!.date)}</text>}
+        </g>
+        {target != null && (
+          <g>
+            <line x1={pad.l} x2={width - pad.r} y1={y(target)} y2={y(target)} stroke="var(--text-3)" strokeDasharray="4 4" />
+            <text x={width - pad.r} y={y(target) - 5} textAnchor="end" style={{ fill: 'var(--text-3)', fontSize: 10.5 }}>target {format(target)}</text>
+          </g>
+        )}
+        {pts.length > 1 && <path d={smoothPath(pts)} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" />}
+        {pts.map(([px, py], i) => (
+          <circle key={i} cx={px} cy={py} r={hover === i || i === pts.length - 1 ? 5 : 3.5} fill={i === pts.length - 1 ? color : 'var(--surface)'} stroke={color} strokeWidth={2} />
+        ))}
+        {pts.map(([px], i) => (
+          <rect key={`h${i}`} x={px - Math.max(8, w / pts.length / 2)} y={pad.t} width={Math.max(16, w / pts.length)} height={h} fill="transparent"
+            onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
+        ))}
+      </svg>
+      {hover !== null && (
+        <div className="tooltip" style={{ left: Math.min(Math.max(pts[hover][0], 80), width - 80), top: pts[hover][1] }}>
+          <div className="tt-title">{format(points[hover].value)}</div>
+          <div className="tt-row"><span>{fmtDate(points[hover].date)}</span>{hover > 0 && <b>{points[hover].value - points[hover - 1].value > 0 ? '+' : ''}{format(points[hover].value - points[hover - 1].value)}</b>}</div>
+        </div>
+      )}
+      <span className="sr-only">{improving ? 'Improving' : 'Not improving'}</span>
+    </div>
+  );
+}

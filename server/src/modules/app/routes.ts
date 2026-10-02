@@ -8,6 +8,10 @@ import { uuid } from '../../lib/http.js';
 import { loadInvoice } from '../billing/routes.js';
 import { streamInvoicePdf } from '../billing/pdf.js';
 import { accessDecision } from '../common/routes.js';
+import { z } from 'zod';
+import { isoDate } from '../../lib/http.js';
+import { bmr, loadNutritionPlan, loadWorkoutPlan } from '../fitness/service.js';
+import { rawImage, sendPhoto, storePhoto } from '../fitness/routes.js';
 
 // Member App API. Reads the same tables the CRM writes, so a renewal or
 // payment recorded at the desk is visible here immediately.
@@ -30,6 +34,7 @@ appRouter.get('/', async (req, res) => {
   const balance = await one(`SELECT outstanding FROM member_balances WHERE member_id = $1`, [memberId]);
   const pt = await one(`SELECT count(*)::int AS n FROM member_pt_package_status WHERE member_id = $1 AND effective_status = 'active'`, [memberId]);
   const visits = await one(`SELECT last_visit_at, visits_30d FROM member_visit_stats WHERE member_id = $1`, [memberId]);
+  const plans = await one(`SELECT EXISTS (SELECT 1 FROM workout_plans WHERE member_id = $1 AND status = 'active') AS workout, EXISTS (SELECT 1 FROM nutrition_plans WHERE member_id = $1 AND status = 'active') AS nutrition`, [memberId]);
   const access = accessDecision(membership!.status);
   // Feature flags are decided here, not in the app, so a client cannot unlock
   // sections the member is not entitled to.
@@ -47,8 +52,9 @@ appRouter.get('/', async (req, res) => {
       checkIn: active,
       classes: active && !!membership?.class_access,
       personalTraining: pt!.n > 0 || (active && !!membership?.pt_access),
-      workouts: active,
-      nutrition: false,
+      workouts: plans!.workout,
+      nutrition: plans!.nutrition,
+      progress: true,
     },
   });
 });
@@ -191,4 +197,67 @@ appRouter.get('/appointments', async (req, res) => {
        LEFT JOIN users su ON su.id = a.staff_id WHERE a.member_id = $1 AND a.starts_at > now() - interval '30 days' ORDER BY a.starts_at`,
     [auth(req).memberId],
   ));
+});
+
+// ------------------------------------------------------- Phase 4: fitness --
+
+appRouter.get('/workout', async (req, res) => {
+  const p = await one(`SELECT id FROM workout_plans WHERE member_id = $1 AND status = 'active'`, [auth(req).memberId]);
+  if (!p) { res.json(null); return; }
+  const plan = await loadWorkoutPlan(p.id);
+  const logs = await query(
+    `SELECT l.id, l.day_id, d.name AS day_name, l.performed_on, l.duration_min, l.rpe, l.notes, l.entries FROM workout_logs l
+       LEFT JOIN workout_days d ON d.id = l.day_id WHERE l.plan_id = $1 ORDER BY l.performed_on DESC LIMIT 30`,
+    [p.id],
+  );
+  res.json({ ...plan, logs });
+});
+
+appRouter.post('/workout-logs', async (req, res) => {
+  const b = z.object({
+    dayId: uuid.optional().nullable(),
+    performedOn: isoDate.optional(),
+    durationMin: z.coerce.number().int().min(1).max(300).optional().nullable(),
+    rpe: z.coerce.number().int().min(1).max(10).optional().nullable(),
+    notes: z.string().trim().max(1000).optional().nullable(),
+    entries: z.array(z.object({ exercise: z.string().trim().min(1).max(80), sets: z.array(z.object({ reps: z.coerce.number().int().min(0).max(200), weightKg: z.coerce.number().min(0).max(500).optional().nullable() })).max(20) })).max(30).default([]),
+  }).parse(req.body);
+  const plan = await one(`SELECT id, organization_id FROM workout_plans WHERE member_id = $1 AND status = 'active'`, [auth(req).memberId]);
+  if (!plan) throw conflict('You don’t have an active workout plan');
+  if (b.dayId && !(await one(`SELECT 1 FROM workout_days WHERE id = $1 AND plan_id = $2`, [b.dayId, plan.id]))) throw notFound('Workout day');
+  if (b.performedOn && b.performedOn > new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })) throw conflict('You can’t log a future workout');
+  res.status(201).json(await one(
+    `INSERT INTO workout_logs (organization_id, plan_id, day_id, member_id, performed_on, duration_min, rpe, notes, entries, source)
+     VALUES ($1,$2,$3,$4,COALESCE($5::date, current_date),$6,$7,$8,$9,'app') RETURNING *`,
+    [plan.organization_id, plan.id, b.dayId ?? null, auth(req).memberId, b.performedOn ?? null, b.durationMin ?? null, b.rpe ?? null, b.notes ?? null, JSON.stringify(b.entries)],
+  ));
+});
+
+appRouter.get('/nutrition', async (req, res) => {
+  const p = await one(`SELECT id FROM nutrition_plans WHERE member_id = $1 AND status = 'active'`, [auth(req).memberId]);
+  res.json(p ? await loadNutritionPlan(p.id) : null);
+});
+
+appRouter.get('/progress', async (req, res) => {
+  const memberId = auth(req).memberId!;
+  const [m, assessments, photos, profile] = await Promise.all([
+    one(`SELECT gender, date_of_birth FROM members WHERE id = $1`, [memberId]),
+    query(`SELECT assessed_on, weight_kg, height_cm, bmi, body_fat_pct, muscle_mass_kg, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, pushups, plank_seconds, squats_1min, resting_hr
+             FROM fitness_assessments WHERE member_id = $1 ORDER BY assessed_on`, [memberId]),
+    query(`SELECT id, taken_on, angle FROM progress_photos WHERE member_id = $1 ORDER BY taken_on DESC`, [memberId]),
+    one(`SELECT primary_goal, target_weight_kg FROM member_fitness_profiles WHERE member_id = $1`, [memberId]),
+  ]);
+  const latest = assessments.at(-1);
+  res.json({ goal: profile, assessments, photos, bmr: latest ? bmr(latest.weight_kg, latest.height_cm, m!.date_of_birth, m!.gender) : null });
+});
+
+appRouter.post('/photos', rawImage, async (req, res) => {
+  const meta = z.object({ angle: z.enum(['front', 'side', 'back', 'other']).default('front'), takenOn: isoDate.optional() }).parse(req.query);
+  res.status(201).json(await storePhoto(req, auth(req).memberId!, req.body, meta, 'app'));
+});
+
+appRouter.get('/photos/:id', async (req, res) => {
+  const p = await one(`SELECT * FROM progress_photos WHERE id = $1 AND member_id = $2`, [uuid.parse(req.params.id), auth(req).memberId]);
+  if (!p) throw notFound('Photo');
+  await sendPhoto(res, p);
 });

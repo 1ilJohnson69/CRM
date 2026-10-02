@@ -126,11 +126,26 @@ export async function runOpsAutomation() {
       FROM due d JOIN members m ON m.id = d.member_id JOIN class_types ct ON ct.id = d.class_type_id JOIN organizations o ON o.id = d.organization_id`);
 }
 
+/** Tell trainers a few days before a member's workout plan runs out. */
+export async function runFitnessAutomation() {
+  await pool.query(`
+    WITH due AS (
+      UPDATE workout_plans SET end_notified_at = now()
+       WHERE status = 'active' AND member_id IS NOT NULL AND trainer_id IS NOT NULL AND end_notified_at IS NULL
+         AND ends_on BETWEEN current_date AND current_date + 3
+      RETURNING id, organization_id, branch_id, member_id, trainer_id, name, ends_on)
+    INSERT INTO notifications (organization_id, branch_id, recipient_id, audience, type, title, body, entity_type, entity_id)
+    SELECT d.organization_id, d.branch_id, d.trainer_id, 'staff', 'workout_plan.ending', u.full_name || '’s plan ends ' || to_char(d.ends_on, 'DD Mon'),
+           d.name || ' — time to review progress and set the next block.', 'workout_plan', d.id
+      FROM due d JOIN members m ON m.id = d.member_id JOIN users u ON u.id = m.user_id`);
+}
+
 export function scheduleJobs() {
   const run = () =>
     runRenewalReminders()
       .then(runFollowUpAutomation)
       .then(runOpsAutomation)
+      .then(runFitnessAutomation)
       .catch((err) => console.error('scheduled jobs failed', err));
   run();
   setInterval(run, 60 * 60 * 1000).unref();

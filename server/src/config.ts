@@ -15,5 +15,6 @@ export const config = {
   jwtSecret: required('JWT_SECRET', isProd ? undefined : 'dev-only-secret-do-not-use-in-production'),
   accessTokenTtl: process.env.ACCESS_TOKEN_TTL ?? '15m',
   refreshTokenDays: Number(process.env.REFRESH_TOKEN_DAYS ?? 30),
+  uploadDir: process.env.UPLOAD_DIR ?? new URL('../uploads/', import.meta.url).pathname,
   corsOrigin: (process.env.CORS_ORIGIN ?? 'http://localhost:5173').split(','),
 };

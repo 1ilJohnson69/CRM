@@ -46,9 +46,9 @@ export const NAV: { group: string | null; items: NavItem[] }[] = [
   {
     group: 'Fitness',
     items: [
-      { label: 'Workouts', to: '/workouts', icon: Activity, phase: 4 },
-      { label: 'Nutrition', to: '/nutrition', icon: Apple, phase: 4 },
-      { label: 'Assessments', to: '/assessments', icon: ClipboardList, phase: 4 },
+      { label: 'Workouts', to: '/workouts', icon: Activity, perm: 'workouts.read' },
+      { label: 'Nutrition', to: '/nutrition', icon: Apple, perm: 'nutrition.read' },
+      { label: 'Assessments', to: '/assessments', icon: ClipboardList, perm: 'assessments.read' },
     ],
   },
   {
