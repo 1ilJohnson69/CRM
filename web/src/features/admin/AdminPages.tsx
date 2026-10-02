@@ -1,8 +1,8 @@
 import { Fragment, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, KeyRound, Pencil, Plus, Search, ShieldCheck, UserCog } from 'lucide-react';
-import { api, ApiError, type Paged } from '../../lib/api';
+import { Building2, FileDown, KeyRound, Pencil, Plus, Search, ShieldCheck, UserCog } from 'lucide-react';
+import { api, ApiError, downloadFile, type Paged } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useDebounced, useToast } from '../../lib/ui';
 import { date, dateTime, number, relative } from '../../lib/format';
@@ -305,23 +305,36 @@ export function SettingsPage() {
 // ------------------------------------------------------------- audit logs --
 
 export function AuditPage() {
+  const toast = useToast();
   const [search, setSearch] = useState('');
   const [entity, setEntity] = useState('');
+  const [actor, setActor] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState<string | null>(null);
   const term = useDebounced(search.trim());
-  const { data } = useQuery({ queryKey: ['audit', term, entity, page], queryFn: () => api.get<Paged<any>>('/admin/audit-logs', { search: term, entityType: entity, page, pageSize: 30 }), placeholderData: keepPreviousData });
+  const filters = { search: term, entityType: entity, actorId: actor || undefined, from: from || undefined, to: to || undefined };
+  const { data: facets } = useQuery({ queryKey: ['audit-facets'], queryFn: () => api.get<any>('/admin/audit-logs/facets') });
+  const { data } = useQuery({ queryKey: ['audit', filters, page], queryFn: () => api.get<Paged<any>>('/admin/audit-logs', { ...filters, page, pageSize: 30 }), placeholderData: keepPreviousData });
+  const reset = (fn: () => void) => { fn(); setPage(1); };
   return (
     <div className="page">
-      <div className="page-head"><div><h1>Audit logs</h1><div className="sub">Who changed what, and when. Payments and membership changes keep before/after values.</div></div></div>
+      <div className="page-head">
+        <div><h1>Audit logs</h1><div className="sub">Who changed what, and when. Money, membership, stock and permission changes keep before/after values.</div></div>
+        <div className="actions"><Button icon={<FileDown />} onClick={() => downloadFile('/admin/audit-logs', { ...filters, format: 'csv' }).catch((e) => toast('error', e.message))}>Export CSV</Button></div>
+      </div>
       <section className="card">
         <div className="toolbar">
-          <div className="search-box"><Search /><input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Search actions" /></div>
-          <div className="chips">
-            {[['', 'All'], ['payment', 'Payments'], ['membership', 'Memberships'], ['member', 'Members'], ['invoice', 'Invoices'], ['user', 'Staff'], ['role', 'Roles']].map(([k, l]) => (
-              <button key={k} className={`chip ${entity === k ? 'on' : ''}`} onClick={() => { setEntity(k); setPage(1); }}>{l}</button>
-            ))}
-          </div>
+          <div className="search-box"><Search /><input value={search} onChange={(e) => reset(() => setSearch(e.target.value))} placeholder="Search summaries and actions" /></div>
+          <select className="select" style={{ width: 170 }} value={entity} onChange={(e) => reset(() => setEntity(e.target.value))} aria-label="Record type">
+            <option value="">All records</option>{facets?.entities.map((f: any) => <option key={f.entity_type} value={f.entity_type}>{f.entity_type.replace(/_/g, ' ')} ({f.n})</option>)}
+          </select>
+          <select className="select" style={{ width: 170 }} value={actor} onChange={(e) => reset(() => setActor(e.target.value))} aria-label="Who">
+            <option value="">Anyone</option>{facets?.actors.map((a: any) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+          </select>
+          <input type="date" className="input" style={{ width: 150 }} value={from} onChange={(e) => reset(() => setFrom(e.target.value))} aria-label="From" />
+          <input type="date" className="input" style={{ width: 150 }} value={to} onChange={(e) => reset(() => setTo(e.target.value))} aria-label="To" />
         </div>
         <div className="table-wrap">
           {!data ? <div style={{ padding: 20 }}><Skeleton h={400} /></div> : !data.data.length ? <Empty title="No entries" /> : (
@@ -333,16 +346,11 @@ export function AuditPage() {
                     <td className="muted" style={{ whiteSpace: 'nowrap' }}>{dateTime(a.created_at)}</td>
                     <td>{a.actor ?? 'System'}</td>
                     <td><code className="faint" style={{ fontSize: 12 }}>{a.action}</code></td>
-                    <td>{a.summary}</td>
+                    <td>{a.summary}{(a.before || a.after) && <span className="faint" style={{ fontSize: 12 }}> · {open === a.id ? 'hide' : 'details'}</span>}</td>
                     <td className="muted hide-sm">{a.branch_name ?? '—'}</td>
                   </tr>
                   {open === a.id && (a.before || a.after) && (
-                    <tr><td colSpan={5} style={{ background: 'var(--surface-2)' }}>
-                      <div className="grid g-2">
-                        <div><div className="section-label">Before</div><pre style={{ margin: 0, fontSize: 12, whiteSpace: 'pre-wrap' }}>{JSON.stringify(a.before, null, 2) ?? '—'}</pre></div>
-                        <div><div className="section-label">After</div><pre style={{ margin: 0, fontSize: 12, whiteSpace: 'pre-wrap' }}>{JSON.stringify(a.after, null, 2) ?? '—'}</pre></div>
-                      </div>
-                    </td></tr>
+                    <tr><td colSpan={5} style={{ background: 'var(--surface-2)' }}><AuditDiff before={a.before} after={a.after} /></td></tr>
                   )}
                 </Fragment>
               ))}</tbody>
@@ -352,5 +360,20 @@ export function AuditPage() {
         {data && data.pagination.total > 0 && <Pagination {...data.pagination} onPage={setPage} />}
       </section>
     </div>
+  );
+}
+
+/** Field-by-field before/after, highlighting what changed. */
+function AuditDiff({ before, after }: { before: any; after: any }) {
+  const flat = (o: any) => (o && typeof o === 'object' && !Array.isArray(o) ? o : o == null ? {} : { value: o });
+  const b = flat(before), a = flat(after);
+  const keys = [...new Set([...Object.keys(b), ...Object.keys(a)])];
+  const show = (v: any) => (v == null ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+  return (
+    <table className="diff"><thead><tr><th>Field</th><th>Before</th><th>After</th></tr></thead>
+      <tbody>{keys.map((k) => {
+        const changed = show(b[k]) !== show(a[k]);
+        return <tr key={k} className={changed ? 'changed' : ''}><td>{k.replace(/_/g, ' ')}</td><td>{show(b[k])}</td><td>{show(a[k])}</td></tr>;
+      })}</tbody></table>
   );
 }

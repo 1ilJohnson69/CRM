@@ -27,6 +27,11 @@ import { posRouter } from './modules/business/pos.js';
 import { expensesRouter } from './modules/business/expenses.js';
 import { employeesRouter } from './modules/business/employees.js';
 import { loyaltyRouter, referralsRouter } from './modules/engagement/routes.js';
+import { eventsRouter } from './modules/events/routes.js';
+import { campaignsRouter } from './modules/marketing/campaigns.js';
+import { messagingRouter } from './modules/messaging/routes.js';
+import { automationsRouter } from './modules/automation/routes.js';
+import { reportsRouter } from './modules/reports/routes.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -67,6 +72,11 @@ staff.use('/expenses', expensesRouter);
 staff.use('/employees', employeesRouter);
 staff.use('/loyalty', loyaltyRouter);
 staff.use('/referrals', referralsRouter);
+staff.use('/events', eventsRouter);
+staff.use('/campaigns', campaignsRouter);
+staff.use('/messaging', messagingRouter);
+staff.use('/automations', automationsRouter);
+staff.use('/reports', reportsRouter);
 staff.use('/', commonRouter);
 app.use('/api', staff);
 

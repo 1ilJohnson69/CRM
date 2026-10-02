@@ -14,6 +14,7 @@ import { bmr, loadNutritionPlan, loadWorkoutPlan } from '../fitness/service.js';
 import { rawImage, sendPhoto, storePhoto } from '../fitness/routes.js';
 import { loyaltySettings } from '../engagement/loyalty.js';
 import { createReferralLead } from '../engagement/routes.js';
+import { cancelRegistration, priceFor, registerForEvent } from '../events/routes.js';
 
 // Member App API. Reads the same tables the CRM writes, so a renewal or
 // payment recorded at the desk is visible here immediately.
@@ -23,7 +24,7 @@ appRouter.use(requireMember);
 appRouter.get('/', async (req, res) => {
   const memberId = auth(req).memberId!;
   const profile = await one(
-    `SELECT m.id, m.member_code, m.join_date, m.date_of_birth, m.gender, m.address, m.emergency_contact_name, m.emergency_contact_phone,
+    `SELECT m.id, m.member_code, m.join_date, m.marketing_opt_out, m.date_of_birth, m.gender, m.address, m.emergency_contact_name, m.emergency_contact_phone,
             u.full_name, u.email, u.phone, u.avatar_url, u.must_change_password, b.name AS branch_name, b.phone AS branch_phone
        FROM members m JOIN users u ON u.id = m.user_id JOIN branches b ON b.id = m.branch_id WHERE m.id = $1`,
     [memberId],
@@ -60,6 +61,7 @@ appRouter.get('/', async (req, res) => {
       progress: true,
       loyalty: loyalty.enabled,
       referrals: true,
+      events: true,
     },
   });
 });
@@ -314,4 +316,53 @@ appRouter.post('/referrals', async (req, res) => {
     return createReferralLead(c, req, referrer!, { name: b.name, phone: b.phone }, 'app');
   });
   res.status(201).json({ id: result.referral.id, status: result.referral.status });
+});
+
+// ------------------------------------------------------------------- events --
+
+appRouter.get('/events', async (req, res) => {
+  const memberId = auth(req).memberId!;
+  const m = await one(`SELECT branch_id FROM members WHERE id = $1`, [memberId]);
+  const rows = await query(
+    `SELECT e.id, e.title, e.type, e.description, e.starts_at, e.ends_at, e.location, e.capacity, e.price, e.member_price, e.attendance_points,
+            e.registration_closes_at, b.name AS branch_name,
+            (SELECT count(*) FROM event_registrations r WHERE r.event_id = e.id AND r.status IN ('registered','attended'))::int AS registered,
+            mine.id AS registration_id, mine.status AS my_status, i.status AS payment_status, i.total - i.amount_paid AS amount_due
+       FROM events e JOIN branches b ON b.id = e.branch_id
+       LEFT JOIN event_registrations mine ON mine.event_id = e.id AND mine.member_id = $1 AND mine.status <> 'cancelled'
+       LEFT JOIN invoices i ON i.id = mine.invoice_id
+      WHERE e.organization_id = $2 AND e.status IN ('published','completed') AND (e.branch_id = $3 OR mine.id IS NOT NULL)
+        AND (e.ends_at >= now() OR mine.id IS NOT NULL) AND e.starts_at > now() - interval '60 days'
+      ORDER BY e.ends_at < now(), e.starts_at`,
+    [memberId, auth(req).orgId, m!.branch_id],
+  );
+  res.json(rows.map((e) => ({
+    ...e, my_price: priceFor(e, true),
+    spots_left: e.capacity == null ? null : Math.max(0, e.capacity - e.registered),
+    can_register: !e.registration_id && new Date(e.ends_at) > new Date() && (!e.registration_closes_at || new Date(e.registration_closes_at) > new Date()),
+  })));
+});
+
+appRouter.post('/events/:id/register', async (req, res) => {
+  const id = uuid.parse(req.params.id);
+  const m = await one(`SELECT branch_id FROM members WHERE id = $1`, [auth(req).memberId]);
+  const e = await one(`SELECT branch_id FROM events WHERE id = $1 AND organization_id = $2`, [id, auth(req).orgId]);
+  if (!e || e.branch_id !== m!.branch_id) throw notFound('Event');
+  const r = await tx((c) => registerForEvent(c, req, { eventId: id, memberId: auth(req).memberId, source: 'app' }));
+  res.status(201).json({ status: r.registration.status, amountDue: r.invoice ? r.invoice.total : 0 });
+});
+
+appRouter.post('/events/registrations/:id/cancel', async (req, res) => {
+  const id = uuid.parse(req.params.id);
+  const reg = await one(`SELECT member_id FROM event_registrations WHERE id = $1`, [id]);
+  if (!reg || reg.member_id !== auth(req).memberId) throw notFound('Registration');
+  res.json(await tx((c) => cancelRegistration(c, req, id, 'member')));
+});
+
+// -------------------------------------------------------------- preferences --
+
+appRouter.put('/preferences', async (req, res) => {
+  const b = z.object({ marketingOptOut: z.boolean() }).parse(req.body);
+  await pool.query(`UPDATE members SET marketing_opt_out = $2 WHERE id = $1`, [auth(req).memberId, b.marketingOptOut]);
+  res.json(b);
 });

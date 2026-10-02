@@ -7,6 +7,7 @@ import { useAuth } from '../../lib/auth';
 import { useDebounced, useToast } from '../../lib/ui';
 import { dateTime, number } from '../../lib/format';
 import { Alert, Badge, Button, Dialog, Empty, Field, Pagination, Skeleton, Tabs } from '../../components/ui';
+import { Outbox } from '../advanced/MessagingPages';
 import { channelIcon, CHANNEL_LABEL, OUTCOME_LABEL } from './common';
 
 function TemplateDialog({ template, placeholders, onClose }: { template?: any; placeholders: string[]; onClose: () => void }) {
@@ -123,12 +124,12 @@ function Log() {
 
 export function CommunicationPage() {
   const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as 'log' | 'templates') ?? 'log';
+  const tab = (params.get('tab') as 'log' | 'outbox' | 'templates') ?? 'log';
   return (
     <div className="page">
       <div className="page-head"><div><h1>Communication</h1><div className="sub">Every call, message and note with leads and members, in one log.</div></div></div>
-      <Tabs value={tab} onChange={(t) => setParams({ tab: t })} tabs={[{ key: 'log', label: 'Activity log' }, { key: 'templates', label: 'Templates' }]} />
-      {tab === 'log' ? <Log /> : <Templates />}
+      <Tabs value={tab} onChange={(t) => setParams({ tab: t })} tabs={[{ key: 'log', label: 'Activity log' }, { key: 'outbox', label: 'Outbox' }, { key: 'templates', label: 'Templates' }]} />
+      {tab === 'log' ? <Log /> : tab === 'outbox' ? <Outbox /> : <Templates />}
     </div>
   );
 }

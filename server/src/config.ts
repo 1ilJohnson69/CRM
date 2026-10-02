@@ -17,4 +17,13 @@ export const config = {
   refreshTokenDays: Number(process.env.REFRESH_TOKEN_DAYS ?? 30),
   uploadDir: process.env.UPLOAD_DIR ?? new URL('../uploads/', import.meta.url).pathname,
   corsOrigin: (process.env.CORS_ORIGIN ?? 'http://localhost:5173').split(','),
+  // Messaging gateways are plain HTTPS webhooks so any WhatsApp/SMS/email
+  // provider (or an adapter in front of one) can be plugged in. Secrets stay
+  // server-side; the CRM only ever reports whether a channel is connected.
+  messaging: Object.fromEntries(
+    (['whatsapp', 'sms', 'email'] as const).map((ch) => {
+      const prefix = `MESSAGING_${ch.toUpperCase()}`;
+      return [ch, { url: process.env[`${prefix}_URL`] || null, token: process.env[`${prefix}_TOKEN`] || null, name: process.env[`${prefix}_PROVIDER`] || null }];
+    }),
+  ) as Record<'whatsapp' | 'sms' | 'email', { url: string | null; token: string | null; name: string | null }>,
 };

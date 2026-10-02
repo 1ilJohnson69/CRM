@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, Mail, MessageCircle, MessageSquareText, Phone, StickyNote, Users } from 'lucide-react';
+import { Bell, CalendarClock, Mail, MessageCircle, MessageSquareText, Phone, StickyNote, Users } from 'lucide-react';
 import { api, ApiError } from '../../lib/api';
 import { useToast } from '../../lib/ui';
 import { Alert, Button, Dialog, Field, Segmented } from '../../components/ui';
@@ -37,10 +37,10 @@ export const OUTCOME_LABEL: Record<string, string> = {
   converted: 'Converted', renewed: 'Renewed', paid: 'Paid', other: 'Other',
 };
 const CHANNEL_ICON: Record<string, ReactNode> = {
-  call: <Phone />, whatsapp: <MessageCircle />, sms: <MessageSquareText />, email: <Mail />, in_person: <Users />, note: <StickyNote />, other: <CalendarClock />,
+  call: <Phone />, whatsapp: <MessageCircle />, sms: <MessageSquareText />, email: <Mail />, push: <Bell />, in_person: <Users />, note: <StickyNote />, other: <CalendarClock />,
 };
 export const channelIcon = (c: string) => CHANNEL_ICON[c] ?? <CalendarClock />;
-export const CHANNEL_LABEL: Record<string, string> = { ...FU_TYPE_LABEL, note: 'Note' };
+export const CHANNEL_LABEL: Record<string, string> = { ...FU_TYPE_LABEL, note: 'Note', push: 'App push' };
 
 // ------------------------------------------------------------ due presets --
 

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { one, query, tx } from '../../db/pool.js';
+import { one, pool, query, tx } from '../../db/pool.js';
 import { auth, can, hashPassword, temporaryPassword } from '../../lib/auth.js';
 import { audit } from '../../lib/audit.js';
 import { badRequest, conflict, forbidden, notFound } from '../../lib/errors.js';
@@ -277,6 +277,9 @@ adminRouter.put('/organization', can('settings.manage'), async (req, res) => {
       `UPDATE organizations SET name=$2, legal_name=$3, gstin=$4, invoice_prefix=$5, expiring_soon_days=$6, renewal_reminder_days=$7 WHERE id=$1`,
       [auth(req).orgId, body.name, body.legalName ?? null, body.gstin ?? null, body.invoicePrefix, body.expiringSoonDays, body.renewalReminderDays],
     );
+    // The reminder schedule drives the built-in "Renewal reminders" automation.
+    await c.query(`UPDATE automation_rules SET params = jsonb_build_object('days', $2::int[]), updated_at = now() WHERE organization_id = $1 AND key = 'renewal_reminders'`,
+      [auth(req).orgId, body.renewalReminderDays.length ? body.renewalReminderDays : [7]]);
     await audit(c, req, { action: 'settings.updated', entityType: 'organization', entityId: auth(req).orgId, summary: 'Organization settings updated', before, after: body });
   });
   res.status(204).end();
@@ -284,25 +287,37 @@ adminRouter.put('/organization', can('settings.manage'), async (req, res) => {
 
 // ------------------------------------------------------------ audit logs ----
 
+const auditFilters = paginationSchema.extend({
+  search: z.string().trim().optional(),
+  entityType: z.string().optional(),
+  action: z.string().optional(),
+  actorId: uuid.optional(),
+  from: isoDate.optional(),
+  to: isoDate.optional(),
+  format: z.enum(['json', 'csv']).default('json'),
+});
+
+adminRouter.get('/audit-logs/facets', can('audit.read'), async (req, res) => {
+  const [entities, actors] = await Promise.all([
+    query(`SELECT entity_type, count(*)::int AS n FROM audit_logs WHERE organization_id = $1 GROUP BY 1 ORDER BY 2 DESC`, [auth(req).orgId]),
+    query(`SELECT DISTINCT u.id, u.full_name FROM audit_logs a JOIN users u ON u.id = a.actor_id WHERE a.organization_id = $1 AND u.kind = 'staff' ORDER BY u.full_name`, [auth(req).orgId]),
+  ]);
+  res.json({ entities, actors });
+});
+
 adminRouter.get('/audit-logs', can('audit.read'), async (req, res) => {
-  const q = paginationSchema
-    .extend({ search: z.string().trim().optional(), entityType: z.string().optional(), actorId: uuid.optional() })
-    .parse(req.query);
+  const q = auditFilters.parse(req.query);
   const params: unknown[] = [auth(req).orgId, auth(req).branchIds];
   const where = [`a.organization_id = $1`, `(a.branch_id IS NULL OR a.branch_id = ANY($2))`];
-  if (q.search) {
-    params.push(`%${q.search}%`);
-    where.push(`a.summary ILIKE $${params.length}`);
-  }
-  if (q.entityType) {
-    params.push(q.entityType);
-    where.push(`a.entity_type = $${params.length}`);
-  }
-  if (q.actorId) {
-    params.push(q.actorId);
-    where.push(`a.actor_id = $${params.length}`);
-  }
-  params.push(q.pageSize, (q.page - 1) * q.pageSize);
+  const add = (sql: string, v: unknown) => { params.push(v); where.push(sql.replaceAll('$?', `$${params.length}`)); };
+  if (q.search) add(`(a.summary ILIKE $? OR a.action ILIKE $?)`, `%${q.search}%`);
+  if (q.entityType) add(`a.entity_type = $?`, q.entityType);
+  if (q.action) add(`a.action LIKE $?`, `${q.action}%`);
+  if (q.actorId) add(`a.actor_id = $?`, q.actorId);
+  if (q.from) add(`a.created_at >= $?::date`, q.from);
+  if (q.to) add(`a.created_at < $?::date + 1`, q.to);
+  const csv = q.format === 'csv';
+  params.push(csv ? 10000 : q.pageSize, csv ? 0 : (q.page - 1) * q.pageSize);
   const rows = await query(
     `SELECT a.id, a.action, a.entity_type, a.entity_id, a.summary, a.before, a.after, a.ip, a.created_at,
             u.full_name AS actor, b.name AS branch_name, count(*) OVER() AS total_count
@@ -311,5 +326,17 @@ adminRouter.get('/audit-logs', can('audit.read'), async (req, res) => {
       ORDER BY a.created_at DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
     params,
   );
+  if (csv) {
+    const cell = (v: unknown) => {
+      const s0 = v == null ? '' : v instanceof Date ? v.toISOString() : typeof v === 'object' ? JSON.stringify(v) : String(v);
+      const s1 = /^[=+\-@]/.test(s0) ? `'${s0}` : s0;
+      return /[",\n]/.test(s1) ? `"${s1.replace(/"/g, '""')}"` : s1;
+    };
+    const cols = ['created_at', 'actor', 'branch_name', 'action', 'entity_type', 'entity_id', 'summary', 'ip', 'before', 'after'];
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="audit-log-${new Date().toISOString().slice(0, 10)}.csv"`);
+    await audit(pool, req, { action: 'audit.exported', entityType: 'audit_log', summary: `Audit log exported (${rows.length} entries)` });
+    return res.send([cols.join(','), ...rows.map((r) => cols.map((c) => cell((r as any)[c])).join(','))].join('\n'));
+  }
   res.json(paged(rows, q.page, q.pageSize));
 });

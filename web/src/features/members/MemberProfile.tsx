@@ -277,15 +277,25 @@ function FollowUpsTab({ m }: { m: any }) {
 function CommunicationTab({ m }: { m: any }) {
   const { can } = useAuth();
   const actions = useActions();
+  const qc = useQueryClient();
+  const consent = useMutation({
+    mutationFn: (optOut: boolean) => api.post('/messaging/consent', { memberId: m.id, optOut }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['member', m.id] }),
+  });
   const { data } = useQuery({ queryKey: ['communications', { memberId: m.id }], queryFn: () => api.get<Paged<any>>('/communications', { memberId: m.id, pageSize: 100 }), enabled: can('communications.log') });
   return (
-    <Card title="Communication" icon={<Contact />} actions={can('communications.log') && <Button size="sm" variant="primary" icon={<MessageCircle />} onClick={() => actions.contact({ memberId: m.id, name: m.full_name })}>Contact</Button>}>
+    <Card title="Communication" icon={<Contact />} sub={m.marketing_opt_out ? 'Opted out of promotional messages — campaigns skip this member' : 'Receives promotional messages'}
+      actions={<>
+        {can('members.write') && <label className="check" style={{ fontSize: 13 }}><input type="checkbox" checked={!m.marketing_opt_out} disabled={consent.isPending} onChange={(e) => consent.mutate(!e.target.checked)} />Promotions</label>}
+        {can('communications.log') && <Button size="sm" variant="primary" icon={<MessageCircle />} onClick={() => actions.contact({ memberId: m.id, name: m.full_name })}>Contact</Button>}
+      </>}>
       {!can('communications.log') ? <Empty title="You don't have access to communication logs" /> : !data ? <Skeleton h={160} /> : !data.data.length ? <Empty title="No communication yet" /> : (
         <div className="feed">{data.data.map((c) => (
           <div className="feed-item" key={c.id}>
             <div className="ic">{channelIcon(c.channel)}</div>
             <div>
-              <div className="txt"><b>{CHANNEL_LABEL[c.channel]}</b>{c.template_name ? ` · ${c.template_name}` : ''}{c.outcome ? ` · ${OUTCOME_LABEL[c.outcome] ?? c.outcome}` : ''}</div>
+              <div className="txt"><b>{CHANNEL_LABEL[c.channel]}</b>{c.template_name ? ` · ${c.template_name}` : ''}{c.outcome ? ` · ${OUTCOME_LABEL[c.outcome] ?? c.outcome}` : ''}
+                {c.status && c.status !== 'logged' && <span className={`badge ${c.status === 'queued' ? 'warning' : c.status === 'failed' ? 'danger' : 'neutral'}`} style={{ marginLeft: 6 }}>{c.status}</span>}</div>
               {c.body && <div className="muted" style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{c.body}</div>}
               <div className="when">{dateTime(c.created_at)} · {c.logged_by_name}</div>
             </div>

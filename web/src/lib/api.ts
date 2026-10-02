@@ -137,3 +137,18 @@ export interface Paged<T> {
   data: T[];
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
 }
+
+/** Downloads an authenticated file (CSV exports) without exposing the token in a URL. */
+export async function downloadFile(path: string, query?: Record<string, string | number | boolean | undefined | null>) {
+  const doFetch = () => fetch(`/api${path}${qs(query as any)}`, { headers: { Authorization: `Bearer ${tokens?.accessToken}`, 'X-Branch-Id': branchId } });
+  let res = await doFetch();
+  if (res.status === 401 && (await refresh())) res = await doFetch();
+  if (!res.ok) throw new ApiError(res.status, 'download', (await res.json().catch(() => ({})))?.error?.message ?? 'Download failed');
+  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'export.csv';
+  const url = URL.createObjectURL(await res.blob());
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}

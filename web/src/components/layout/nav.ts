@@ -1,7 +1,7 @@
 import {
   Activity, Apple, BarChart3, Building2, CalendarClock, CalendarDays, ClipboardCheck, ClipboardList, Contact, CreditCard, Dumbbell,
   Gift, Handshake, Layers, LayoutDashboard, Megaphone, MessageSquare, Package, PhoneCall, Receipt, ScanLine, ScrollText,
-  Settings, ShieldCheck, ShoppingBag, Ticket, Trophy, UserCog, Users, Wallet, type LucideIcon,
+  PlugZap, Settings, ShieldCheck, ShoppingBag, Ticket, Trophy, UserCog, Users, Wallet, Workflow, type LucideIcon,
 } from 'lucide-react';
 
 export interface NavItem {
@@ -30,7 +30,7 @@ export const NAV: { group: string | null; items: NavItem[] }[] = [
       { label: 'Memberships', to: '/memberships', icon: Ticket, perm: 'plans.read' },
       { label: 'Personal Training', to: '/pt', icon: Dumbbell, perm: 'appointments.read' },
       { label: 'Classes', to: '/classes', icon: CalendarDays, perm: 'classes.read' },
-      { label: 'Events', to: '/events', icon: Trophy, phase: 6 },
+      { label: 'Events', to: '/events', icon: Trophy, perm: 'events.read' },
     ],
   },
   {
@@ -64,17 +64,19 @@ export const NAV: { group: string | null; items: NavItem[] }[] = [
     items: [
       { label: 'Loyalty', to: '/loyalty', icon: Gift, perm: 'members.read' },
       { label: 'Referrals', to: '/referrals', icon: Handshake, perm: 'members.read' },
-      { label: 'Marketing', to: '/marketing', icon: Megaphone, phase: 6 },
+      { label: 'Marketing', to: '/marketing', icon: Megaphone, perm: 'marketing.read' },
       { label: 'Communication', to: '/communication', icon: MessageSquare, perm: 'communications.log' },
     ],
   },
-  { group: 'Insights', items: [{ label: 'Analytics', to: '/analytics', icon: BarChart3, phase: 6 }] },
+  { group: 'Insights', items: [{ label: 'Reports', to: '/reports', icon: BarChart3, perm: 'reports.read' }] },
   {
     group: 'Administration',
     items: [
       { label: 'Employees', to: '/admin/employees', icon: UserCog, perm: 'staff.read' },
       { label: 'Branches', to: '/admin/branches', icon: Building2 },
       { label: 'Roles & Permissions', to: '/admin/roles', icon: ShieldCheck, perm: 'roles.manage' },
+      { label: 'Automations', to: '/admin/automations', icon: Workflow, perm: 'automations.manage' },
+      { label: 'Integrations', to: '/admin/integrations', icon: PlugZap, perm: 'communications.log' },
       { label: 'Settings', to: '/admin/settings', icon: Settings, perm: 'settings.manage' },
       { label: 'Audit Logs', to: '/admin/audit', icon: ScrollText, perm: 'audit.read' },
     ],

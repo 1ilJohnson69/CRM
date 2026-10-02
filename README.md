@@ -15,7 +15,7 @@ member's app) updates in the same database transaction.
      web/ (Admin CRM)      /api/me (Member App)
 ```
 
-## Status: Phases 1–5 (Core, CRM, Gym operations, Fitness, Business) — complete
+## Status: Phases 1–6 (Core, CRM, Gym operations, Fitness, Business, Advanced) — complete
 
 | Module | Backend | CRM UI |
 |---|---|---|
@@ -88,13 +88,17 @@ member's app) updates in the same database transaction.
 | Referrals | Member A refers B (CRM, lead form or member app) → B becomes a lead in the pipeline → B converts → verified on B's first fully paid membership → reward points to A and a welcome bonus to B (automatic or manual). Each member has a referral code; top referrers and conversion are tracked |
 | Member app | `/me/loyalty` (balance, value, next milestone, rules, history), `/me/referrals` (code, friends' progress — no contact details), refer a friend |
 
-Phase 6 (marketing, events, integrations) appears in the sidebar
-marked `P6` so the full product map is visible.
-They are not wired to fake data.
+### Phase 6 — Advanced
 
-Sending through a provider (WhatsApp Business API, SMS gateway, email) is
-not connected yet: staff send from their own device and the CRM keeps the
-record. `communication_logs` already has `status`/`provider` columns for that.
+| Module | What it does |
+|---|---|
+| Events | Workshops, competitions, seminars, fitness challenges and special events per branch. Draft → publish (optionally announced in the member app) → registration with capacity and an automatic waitlist (promoted when someone cancels) → attendance → close. Paid events raise an `event` invoice (GST-inclusive price, optional member price) so revenue, receipts and outstanding balances follow normal billing; guests are billed as walk-in customers. Attendance awards loyalty points; cancelling an event notifies registrants, voids unpaid invoices and lists paid ones to refund. Members browse, register and cancel in the app |
+| Marketing | Campaigns (membership promotion, renewal, referral, festival offer, birthday, reactivation, lead nurture) to a ready-made audience (expiring, expired, inactive, high-value, new, PT, class…), any saved segment, or leads by stage, per branch, on WhatsApp / SMS / email / app push. Live reach preview per channel, placeholders and offer codes, send now / schedule / stop. Results are measured, not assumed: a recipient converts when they pay (members) or join (leads) within the attribution window; influenced revenue and per-recipient outcomes are shown |
+| Communication integrations | One outbox for staff, campaign and automation messages. App push is delivered in-app instantly; WhatsApp/SMS/email go through an HTTPS gateway per channel configured only in the server environment (`MESSAGING_<CHANNEL>_URL/_TOKEN/_PROVIDER`) with retries, or — with no gateway — wait in a manual queue where staff open the pre-filled WhatsApp/SMS/email and tick it off. Promotional messages respect each member's or lead's opt-out (CRM toggle and app preference) and the organisation's quiet hours |
+| Automation engine | Configurable rules: trigger (membership expiring / expired, member inactive, birthday, payment overdue, new member, lead not contacted, event upcoming) + parameters → actions (app notification, templated message, follow-up for the assigned staff, staff alert, loyalty points). Runs hourly; an occurrence key makes every firing idempotent. Built-in rules replace the earlier hard-coded jobs (renewal reminders, renewal and lapsed calls, win-back, overdue chase, welcome, first-week check-in, lead speed-to-contact, birthday, event reminder); each can be edited, switched off, previewed, run now, and has a per-firing history. Custom rules can be added |
+| Reports | Revenue (trend, by service, method, employee, branch, refunds), Membership (active, new, renewals, lapsed, frozen, cancelled, renewal rate, plan mix), Sales (funnel, sources with conversion and revenue, salespeople, follow-up timeliness), Attendance (trend, peak-hour heatmap, class fill and show-up rates, visit frequency, inactive members), Financial (net revenue, expenses, profit, outstanding by age, refunds). Any range up to two years, buckets by day/week/month, previous-period comparison, CSV export for every table (formula-injection safe) |
+| Multi-branch | Every report, campaign, event and automation is branch-scoped by the same rules as the rest of the CRM; revenue by branch compares locations side by side |
+| Audit log | Filters by record type, person and date range, field-by-field before/after diff, CSV export (itself audited). Events, campaigns, automations, consent and messaging settings are all audited |
 
 ## Run it locally
 
@@ -190,6 +194,16 @@ GET /employees/performance?month=   GET /employees/:id   PUT /employees/:id/hr  
 GET/PUT /loyalty/settings   GET /loyalty/summary|transactions   GET /loyalty/members/:id   POST /loyalty/award
 GET/POST /referrals   GET /referrals/summary   POST /referrals/:id/verify|reward|reject
 
+GET/POST /events   GET /events/summary   GET/PUT /events/:id   POST /events/:id/publish|cancel|complete
+POST /events/:id/registrations   POST /events/registrations/:id/cancel|attendance
+GET/POST /campaigns   GET /campaigns/meta|summary   POST /campaigns/preview   GET/PUT /campaigns/:id
+POST /campaigns/:id/send|schedule|cancel|duplicate
+GET /messaging/integrations   PUT /messaging/settings   POST /messaging/test   POST /messaging/consent
+GET /messaging/outbox   POST /messaging/outbox/mark-sent|discard|retry
+GET/POST /automations   GET /automations/meta   PUT/DELETE /automations/:id   POST /automations/:id/preview|run   GET /automations/:id/runs
+GET /reports/revenue|membership|sales|attendance|financial?from&to[&format=csv&table=]
+GET /admin/audit-logs?search&entityType&action&actorId&from&to[&format=csv]   GET /admin/audit-logs/facets
+
 GET /search?q=         GET /notifications      POST /notifications/read
 GET /access/check?code=
 
@@ -201,6 +215,7 @@ GET /me   GET /me/memberships|payments|invoices|notifications|attendance|classes
 GET /me/invoices/:id/pdf   POST /me/classes/:sessionId/book   POST /me/bookings/:id/cancel
 GET /me/workout|nutrition|progress   POST /me/workout-logs   POST /me/photos   GET /me/photos/:id
 GET /me/loyalty   GET/POST /me/referrals
+GET /me/events   POST /me/events/:id/register   POST /me/events/registrations/:id/cancel   PUT /me/preferences
 ```
 
 ## Layout

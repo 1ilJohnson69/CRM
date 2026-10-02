@@ -1,29 +1,15 @@
 import { generateSessions } from '../modules/ops/classes.js';
 import { pool } from '../db/pool.js';
+import { runAutomations } from '../modules/automation/engine.js';
+import { runScheduledCampaigns } from '../modules/marketing/campaigns.js';
+import { dispatchOutbox } from '../modules/messaging/service.js';
 
 /**
- * Renewal reminders. Idempotent per day: safe to run on every boot and
- * hourly. Member notifications go to the Member App; staff get one digest
- * per branch.
+ * Staff digest of the week's expiries, once per branch per day. Member
+ * reminders, renewal calls and win-backs are configurable automation rules
+ * (see modules/automation).
  */
 export async function runRenewalReminders() {
-  await pool.query(`
-    INSERT INTO notifications (organization_id, branch_id, recipient_id, audience, type, priority, title, body, entity_type, entity_id)
-    SELECT m.organization_id, m.branch_id, m.user_id, 'member', 'membership.expiry_reminder',
-           CASE WHEN cm.days_remaining <= 1 THEN 'high' ELSE 'normal' END,
-           CASE WHEN cm.days_remaining = 0 THEN 'Your membership expires today'
-                ELSE 'Your membership expires in ' || cm.days_remaining || ' day' || CASE WHEN cm.days_remaining = 1 THEN '' ELSE 's' END END,
-           'Renew ' || cm.plan_name || ' at the front desk to keep your access uninterrupted.',
-           'membership', cm.membership_id
-      FROM members m
-      JOIN organizations o ON o.id = m.organization_id
-      JOIN member_current_membership cm ON cm.member_id = m.id
-     WHERE cm.status IN ('active', 'expiring_soon') AND NOT cm.has_upcoming AND NOT cm.is_pass
-       AND cm.days_remaining = ANY(o.renewal_reminder_days)
-       AND NOT EXISTS (
-         SELECT 1 FROM notifications n WHERE n.type = 'membership.expiry_reminder'
-            AND n.entity_id = cm.membership_id AND n.created_at >= current_date)`);
-
   await pool.query(`
     INSERT INTO notifications (organization_id, branch_id, audience, type, priority, title, body)
     SELECT m.organization_id, m.branch_id, 'staff', 'renewals.digest',
@@ -39,29 +25,8 @@ export async function runRenewalReminders() {
      GROUP BY m.organization_id, m.branch_id, b.name`);
 }
 
-/**
- * Turns renewal risk into work: every member 7 days from expiry (or already
- * lapsed within 3 days) gets one renewal follow-up for their assigned staff.
- * Also sends each staff member a daily digest of their follow-ups.
- */
+/** Each staff member's daily digest of their follow-ups. */
 export async function runFollowUpAutomation() {
-  await pool.query(`
-    INSERT INTO follow_ups (organization_id, branch_id, member_id, type, purpose, due_at, assigned_to, notes, auto_generated)
-    SELECT m.organization_id, m.branch_id, m.id, 'call', 'renewal',
-           date_trunc('day', now()) + interval '10 hours',
-           COALESCE(m.assigned_staff_id, (SELECT sb.user_id FROM staff_branches sb JOIN users su ON su.id = sb.user_id AND su.is_active
-                                            JOIN roles r ON r.id = su.role_id AND r.key = 'front_desk'
-                                           WHERE sb.branch_id = m.branch_id ORDER BY su.created_at LIMIT 1)),
-           cm.plan_name || ' ' || CASE WHEN cm.days_remaining < 0 THEN 'expired ' || -cm.days_remaining || ' days ago' ELSE 'expires in ' || cm.days_remaining || ' days' END,
-           true
-      FROM members m
-      JOIN member_current_membership cm ON cm.member_id = m.id
-     WHERE cm.status IN ('active', 'expiring_soon', 'expired') AND NOT cm.has_upcoming AND NOT cm.is_pass
-       AND cm.days_remaining BETWEEN -3 AND 7
-       AND NOT EXISTS (
-         SELECT 1 FROM follow_ups f WHERE f.member_id = m.id AND f.purpose = 'renewal'
-            AND (f.status = 'pending' OR f.created_at >= cm.end_date - 10))`);
-
   await pool.query(`
     INSERT INTO notifications (organization_id, recipient_id, audience, type, priority, title, body)
     SELECT f.organization_id, f.assigned_to, 'staff', 'followups.digest',
@@ -77,28 +42,15 @@ export async function runFollowUpAutomation() {
 }
 
 /**
- * Operations automation: keep the timetable three weeks ahead, close
- * finished classes, turn "stopped coming" into a win-back follow-up, and
- * remind members about tomorrow's classes and appointments.
+ * Operations housekeeping: keep the timetable three weeks ahead, close
+ * finished classes and events, and remind members about tomorrow's classes
+ * and appointments.
  */
 export async function runOpsAutomation() {
   await generateSessions();
+  await pool.query(`UPDATE events SET status = 'completed', updated_at = now() WHERE status = 'published' AND ends_at < now() - interval '1 day'`);
+  await pool.query(`UPDATE event_registrations r SET status = 'no_show' FROM events e WHERE e.id = r.event_id AND e.status = 'completed' AND r.status = 'registered'`);
   await pool.query(`UPDATE class_sessions SET status = 'completed' WHERE status = 'scheduled' AND ends_at < now() - interval '1 hour'`);
-
-  await pool.query(`
-    INSERT INTO follow_ups (organization_id, branch_id, member_id, type, purpose, due_at, assigned_to, notes, auto_generated)
-    SELECT m.organization_id, m.branch_id, m.id, 'call', 'reactivation', date_trunc('day', now()) + interval '11 hours',
-           m.assigned_staff_id,
-           'No visit in ' || (current_date - COALESCE(vs.last_visit_at::date, m.join_date)) || ' days',
-           true
-      FROM members m
-      JOIN organizations o ON o.id = m.organization_id
-      JOIN member_current_membership cm ON cm.member_id = m.id
-      JOIN member_visit_stats vs ON vs.member_id = m.id
-     WHERE cm.status IN ('active', 'expiring_soon') AND NOT cm.is_pass
-       AND COALESCE(vs.last_visit_at, m.join_date::timestamptz) < now() - make_interval(days => o.inactive_after_days)
-       AND NOT EXISTS (SELECT 1 FROM follow_ups f WHERE f.member_id = m.id AND f.purpose IN ('reactivation', 'renewal')
-                         AND (f.status = 'pending' OR f.created_at > now() - interval '30 days'))`);
 
   await pool.query(`
     WITH due AS (
@@ -146,7 +98,11 @@ export function scheduleJobs() {
       .then(runFollowUpAutomation)
       .then(runOpsAutomation)
       .then(runFitnessAutomation)
+      .then(runAutomations)
       .catch((err) => console.error('scheduled jobs failed', err));
   run();
   setInterval(run, 60 * 60 * 1000).unref();
+  // Campaigns and the outbox are time-sensitive: check every minute.
+  const tick = () => runScheduledCampaigns().then(dispatchOutbox).catch((err) => console.error('messaging jobs failed', err));
+  setInterval(tick, 60 * 1000).unref();
 }
