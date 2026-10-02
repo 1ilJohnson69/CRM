@@ -12,6 +12,8 @@ import { z } from 'zod';
 import { isoDate } from '../../lib/http.js';
 import { bmr, loadNutritionPlan, loadWorkoutPlan } from '../fitness/service.js';
 import { rawImage, sendPhoto, storePhoto } from '../fitness/routes.js';
+import { loyaltySettings } from '../engagement/loyalty.js';
+import { createReferralLead } from '../engagement/routes.js';
 
 // Member App API. Reads the same tables the CRM writes, so a renewal or
 // payment recorded at the desk is visible here immediately.
@@ -36,6 +38,7 @@ appRouter.get('/', async (req, res) => {
   const visits = await one(`SELECT last_visit_at, visits_30d FROM member_visit_stats WHERE member_id = $1`, [memberId]);
   const plans = await one(`SELECT EXISTS (SELECT 1 FROM workout_plans WHERE member_id = $1 AND status = 'active') AS workout, EXISTS (SELECT 1 FROM nutrition_plans WHERE member_id = $1 AND status = 'active') AS nutrition`, [memberId]);
   const access = accessDecision(membership!.status);
+  const loyalty = await loyaltySettings(pool, auth(req).orgId);
   // Feature flags are decided here, not in the app, so a client cannot unlock
   // sections the member is not entitled to.
   const active = access.allowed;
@@ -55,6 +58,8 @@ appRouter.get('/', async (req, res) => {
       workouts: plans!.workout,
       nutrition: plans!.nutrition,
       progress: true,
+      loyalty: loyalty.enabled,
+      referrals: true,
     },
   });
 });
@@ -260,4 +265,53 @@ appRouter.get('/photos/:id', async (req, res) => {
   const p = await one(`SELECT * FROM progress_photos WHERE id = $1 AND member_id = $2`, [uuid.parse(req.params.id), auth(req).memberId]);
   if (!p) throw notFound('Photo');
   await sendPhoto(res, p);
+});
+
+// ------------------------------------------------------- loyalty & referrals --
+
+appRouter.get('/loyalty', async (req, res) => {
+  const memberId = auth(req).memberId!;
+  const s = await loyaltySettings(pool, auth(req).orgId);
+  const [account, transactions, visits] = await Promise.all([
+    one(`SELECT balance, earned, redeemed FROM member_loyalty WHERE member_id = $1`, [memberId]),
+    query(`SELECT id, reason, points, description, created_at FROM loyalty_transactions WHERE member_id = $1 ORDER BY created_at DESC LIMIT 50`, [memberId]),
+    one(`SELECT count(*)::int AS n FROM attendance WHERE member_id = $1 AND status <> 'denied'`, [memberId]),
+  ]);
+  const next = s.milestones.find((m) => m.visits > visits!.n);
+  res.json({
+    ...account,
+    value: Math.round(account!.balance * s.pointValue * 100) / 100,
+    canRedeem: s.enabled && account!.balance >= s.minRedeem,
+    nextMilestone: next ? { ...next, visitsToGo: next.visits - visits!.n } : null,
+    rules: {
+      enabled: s.enabled, pointsPer100: s.pointsPer100, renewalPoints: s.renewalPoints, referralPoints: s.referralPoints, refereePoints: s.refereePoints,
+      milestones: s.milestones, pointValue: s.pointValue, minRedeem: s.minRedeem, maxRedeemPct: s.maxRedeemPct,
+    },
+    transactions,
+  });
+});
+
+appRouter.get('/referrals', async (req, res) => {
+  const memberId = auth(req).memberId!;
+  const [me, referrals] = await Promise.all([
+    one(`SELECT referral_code FROM members WHERE id = $1`, [memberId]),
+    // Only what the referrer needs: name, progress and reward — not the friend's contact details.
+    query(`SELECT id, referred_name, status, created_at, joined_at, rewarded_at, reward_points FROM referrals WHERE referrer_member_id = $1 ORDER BY created_at DESC`, [memberId]),
+  ]);
+  const s = await loyaltySettings(pool, auth(req).orgId);
+  res.json({ code: me!.referral_code, rewardPoints: s.referralPoints, friendPoints: s.refereePoints, referrals });
+});
+
+appRouter.post('/referrals', async (req, res) => {
+  const b = z.object({
+    name: z.string().trim().min(2).max(80),
+    phone: z.string().trim().transform((v) => v.replace(/[\s-]/g, '')).pipe(z.string().regex(/^\+?\d{10,13}$/, 'Enter a valid phone number')),
+  }).parse(req.body);
+  const recent = await one(`SELECT count(*)::int AS n FROM referrals WHERE referrer_member_id = $1 AND created_at > now() - interval '1 day'`, [auth(req).memberId]);
+  if (recent!.n >= 10) throw conflict('You’ve shared a lot of referrals today — try again tomorrow');
+  const result = await tx(async (c) => {
+    const referrer = await one(`SELECT m.id, m.branch_id, u.full_name FROM members m JOIN users u ON u.id = m.user_id WHERE m.id = $1`, [auth(req).memberId], c);
+    return createReferralLead(c, req, referrer!, { name: b.name, phone: b.phone }, 'app');
+  });
+  res.status(201).json({ id: result.referral.id, status: result.referral.status });
 });

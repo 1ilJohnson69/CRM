@@ -16,9 +16,10 @@ import { FollowUpRow } from '../crm/FollowUpsPage';
 import { BookClassDialog, BookingBadge } from '../ops/ClassesPage';
 import { PackageProgress, PkgBadge } from '../ops/PtPage';
 import { FitnessTab, NutritionTab, WorkoutTab } from '../fitness/MemberFitness';
+import { LoyaltyTab } from '../business/EngagementPages';
 import { AppointmentActions, AppointmentDialog, APPT_LABEL, APPT_STATUS_LABEL, APPT_STATUS_TONE, SellPtDialog } from '../ops/common';
 
-type Tab = 'overview' | 'membership' | 'fitness' | 'workout' | 'nutrition' | 'attendance' | 'classes' | 'pt' | 'appointments' | 'payments' | 'invoices' | 'followups' | 'communication' | 'app' | 'activity';
+type Tab = 'overview' | 'membership' | 'fitness' | 'workout' | 'nutrition' | 'loyalty' | 'attendance' | 'classes' | 'pt' | 'appointments' | 'payments' | 'invoices' | 'followups' | 'communication' | 'app' | 'activity';
 
 function MembershipActionDialog({ kind, membership, onClose }: { kind: 'freeze' | 'extend' | 'cancel'; membership: any; onClose: () => void }) {
   const qc = useQueryClient();
@@ -443,7 +444,7 @@ export function MemberProfile() {
         { key: 'overview', label: 'Overview' }, { key: 'membership', label: 'Membership' }, { key: 'attendance', label: 'Attendance' },
         ...(can('assessments.read') ? [{ key: 'fitness' as Tab, label: 'Fitness' }] : []), ...(can('workouts.read') ? [{ key: 'workout' as Tab, label: 'Workout' }] : []), ...(can('nutrition.read') ? [{ key: 'nutrition' as Tab, label: 'Nutrition' }] : []),
         { key: 'classes', label: 'Classes' }, { key: 'pt', label: 'PT' }, { key: 'appointments', label: 'Appointments' }, { key: 'payments', label: 'Payments' },
-        { key: 'invoices', label: 'Invoices' }, { key: 'followups', label: 'Follow-ups' }, { key: 'communication', label: 'Communication' },
+        { key: 'invoices', label: 'Invoices' }, { key: 'loyalty', label: 'Loyalty' }, { key: 'followups', label: 'Follow-ups' }, { key: 'communication', label: 'Communication' },
         { key: 'app', label: 'App account' }, { key: 'activity', label: 'Activity' },
       ]} />
       {tab === 'overview' && <Overview m={m} onTab={setTab} />}
@@ -451,6 +452,7 @@ export function MemberProfile() {
       {tab === 'fitness' && <FitnessTab m={m} />}
       {tab === 'workout' && <WorkoutTab m={m} />}
       {tab === 'nutrition' && <NutritionTab m={m} />}
+      {tab === 'loyalty' && <LoyaltyTab m={m} />}
       {tab === 'payments' && <PaymentsTab m={m} />}
       {tab === 'invoices' && <InvoicesTab m={m} />}
       {tab === 'attendance' && <AttendanceTab m={m} />}

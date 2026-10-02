@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { one, query, tx } from '../../db/pool.js';
 import { assertBranch, auth, branchScope, can } from '../../lib/auth.js';
 import { audit, notify } from '../../lib/audit.js';
+import { createReferral, onLeadConverted } from '../engagement/loyalty.js';
 import { badRequest, conflict, HttpError, notFound } from '../../lib/errors.js';
 import { paginationSchema, paged, uuid } from '../../lib/http.js';
 import { createMember, memberCreateSchema } from '../members/service.js';
@@ -210,6 +211,11 @@ leadsRouter.post('/', can('leads.write'), async (req, res) => {
       c,
     );
     await recordStage(c, req, row.id, null, 'new');
+    if (body.referredByMemberId) {
+      const referrer = await one(`SELECT id, branch_id FROM members WHERE id = $1 AND organization_id = $2`, [body.referredByMemberId, auth(req).orgId], c);
+      if (!referrer) throw badRequest('Unknown referring member');
+      await createReferral(c, req, { referrerMemberId: referrer.id, branchId: body.branchId, name: body.fullName, phone: body.phone ?? null, leadId: row.id, source: 'lead' });
+    }
     // Speed-to-lead: every new lead gets a first call scheduled unless the creator picked a time.
     await c.query(
       `INSERT INTO follow_ups (organization_id, branch_id, lead_id, type, purpose, due_at, assigned_to, notes, auto_generated, created_by)
@@ -407,6 +413,7 @@ leadsRouter.post('/:id/convert', can('leads.write', 'members.write'), async (req
       [id, memberId],
     );
     await recordStage(c, req, id, lead.stage, 'won');
+    await onLeadConverted(c, req, id, memberId);
     await cancelPendingFollowUps(c, req, { leadId: id }, 'converted');
     await audit(c, req, {
       action: 'lead.converted', entityType: 'lead', entityId: id, branchId: lead.branch_id,

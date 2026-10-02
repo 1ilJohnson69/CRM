@@ -39,8 +39,8 @@ export const NAV: { group: string | null; items: NavItem[] }[] = [
       { label: 'Attendance', to: '/attendance', icon: ScanLine, perm: 'attendance.read' },
       { label: 'Appointments', to: '/appointments', icon: CalendarClock, perm: 'appointments.read' },
       { label: 'Front Desk', to: '/front-desk', icon: ClipboardCheck, perm: 'attendance.checkin' },
-      { label: 'POS', to: '/pos', icon: ShoppingBag, phase: 5 },
-      { label: 'Inventory', to: '/inventory', icon: Package, phase: 5 },
+      { label: 'POS', to: '/pos', icon: ShoppingBag, perm: 'pos.sell' },
+      { label: 'Inventory', to: '/inventory', icon: Package, perm: 'inventory.read' },
     ],
   },
   {
@@ -56,14 +56,14 @@ export const NAV: { group: string | null; items: NavItem[] }[] = [
     items: [
       { label: 'Payments', to: '/payments', icon: CreditCard, perm: 'payments.read' },
       { label: 'Invoices', to: '/invoices', icon: Receipt, perm: 'invoices.read' },
-      { label: 'Expenses', to: '/expenses', icon: Wallet, phase: 5 },
+      { label: 'Expenses', to: '/expenses', icon: Wallet, perm: 'expenses.read' },
     ],
   },
   {
     group: 'Engagement',
     items: [
-      { label: 'Loyalty', to: '/loyalty', icon: Gift, phase: 5 },
-      { label: 'Referrals', to: '/referrals', icon: Handshake, phase: 5 },
+      { label: 'Loyalty', to: '/loyalty', icon: Gift, perm: 'members.read' },
+      { label: 'Referrals', to: '/referrals', icon: Handshake, perm: 'members.read' },
       { label: 'Marketing', to: '/marketing', icon: Megaphone, phase: 6 },
       { label: 'Communication', to: '/communication', icon: MessageSquare, perm: 'communications.log' },
     ],

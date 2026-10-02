@@ -1,4 +1,5 @@
 import { Router, type Request } from 'express';
+import { onCheckIn } from '../engagement/loyalty.js';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { config } from '../../config.js';
@@ -113,6 +114,7 @@ attendanceRouter.post('/check-in', can('attendance.checkin'), async (req, res) =
       [auth(req).orgId, branchId, card.id, method, status, status === 'allowed' ? null : status === 'override' ? `${decision.reason} — ${body.override!.reason}` : decision.reason, auth(req).userId],
       c,
     );
+    if (status !== 'denied') await onCheckIn(c, auth(req).orgId, card.id, branchId);
     if (status === 'override') {
       await audit(c, req, {
         action: 'attendance.override', entityType: 'member', entityId: card.id, branchId,

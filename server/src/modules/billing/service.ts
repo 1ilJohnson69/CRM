@@ -4,6 +4,7 @@ import { one } from '../../db/pool.js';
 import { audit, notify } from '../../lib/audit.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { round2 } from '../../lib/http.js';
+import { onPaymentRecorded, onPaymentVoided } from '../engagement/loyalty.js';
 
 export const PAYMENT_METHODS = ['cash', 'upi', 'card', 'bank_transfer', 'other'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
@@ -21,7 +22,7 @@ export async function nextSequence(c: PoolClient, orgId: string, key: string): P
   return row!.value;
 }
 
-async function documentNumber(c: PoolClient, orgId: string, prefix: string, key: string) {
+export async function documentNumber(c: PoolClient, orgId: string, prefix: string, key: string) {
   const year = new Date().getFullYear();
   const seq = await nextSequence(c, orgId, `${key}:${year}`);
   return `${prefix}-${year}-${String(seq).padStart(5, '0')}`;
@@ -32,6 +33,8 @@ export interface InvoiceItemInput {
   description: string;
   membershipId?: string | null;
   memberPtPackageId?: string | null;
+  productId?: string | null;
+  unitCost?: number | null;
   quantity?: number;
   unitPrice: number;
   discount?: number;
@@ -41,8 +44,20 @@ export interface InvoiceItemInput {
 export async function createInvoice(
   c: PoolClient,
   req: Request,
-  input: { memberId: string; branchId: string; items: InvoiceItemInput[]; notes?: string; dueDate?: string },
+  input: {
+    memberId: string | null;
+    branchId: string;
+    items: InvoiceItemInput[];
+    notes?: string;
+    dueDate?: string;
+    /** Walk-in buyer at the POS when there is no member record. */
+    customer?: { name: string; phone?: string | null } | null;
+    source?: 'crm' | 'pos' | 'app';
+    /** Loyalty redemption, already validated against the member's balance. */
+    points?: { points: number; discount: number } | null;
+  },
 ) {
+  if (!input.memberId && !input.customer?.name) throw badRequest('Pick a member or enter the customer name');
   if (!input.items.length) throw badRequest('An invoice needs at least one item');
   const orgId = req.auth!.orgId;
   const org = await one(`SELECT invoice_prefix FROM organizations WHERE id = $1`, [orgId], c);
@@ -59,20 +74,25 @@ export async function createInvoice(
   const subtotal = round2(lines.reduce((s, l) => s + l.gross, 0));
   const discount = round2(lines.reduce((s, l) => s + l.discount, 0));
   const tax = round2(lines.reduce((s, l) => s + l.tax, 0));
-  const total = round2(subtotal - discount + tax);
+  const pointsDiscount = round2(input.points?.discount ?? 0);
+  if (pointsDiscount > subtotal - discount + tax) throw badRequest('Points discount exceeds the bill');
+  const total = round2(subtotal - discount + tax - pointsDiscount);
   const number = await documentNumber(c, orgId, org!.invoice_prefix, 'invoice');
 
   const invoice = await one(
-    `INSERT INTO invoices (organization_id, branch_id, member_id, invoice_number, due_date, subtotal, discount, tax, total, amount_paid, status, notes, created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12) RETURNING *`,
-    [orgId, input.branchId, input.memberId, number, input.dueDate ?? null, subtotal, discount, tax, total, total === 0 ? 'paid' : 'pending', input.notes ?? null, req.auth!.userId],
+    `INSERT INTO invoices (organization_id, branch_id, member_id, invoice_number, due_date, subtotal, discount, tax, total, amount_paid, status, notes, created_by,
+                           customer_name, customer_phone, source, points_redeemed, points_discount)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+    [orgId, input.branchId, input.memberId, number, input.dueDate ?? null, subtotal, discount, tax, total, total === 0 ? 'paid' : 'pending', input.notes ?? null, req.auth!.userId,
+      input.memberId ? null : input.customer!.name, input.memberId ? null : input.customer?.phone ?? null, input.source ?? 'crm', input.points?.points ?? 0, pointsDiscount],
     c,
   );
   for (const l of lines) {
     await c.query(
-      `INSERT INTO invoice_items (invoice_id, item_type, description, membership_id, member_pt_package_id, quantity, unit_price, discount, tax_rate, tax, amount)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-      [invoice.id, l.itemType, l.description, l.membershipId ?? null, l.memberPtPackageId ?? null, l.quantity, l.unitPrice, l.discount, l.taxRate, l.tax, l.amount],
+      `INSERT INTO invoice_items (invoice_id, item_type, description, membership_id, member_pt_package_id, quantity, unit_price, discount, tax_rate, tax, amount, product_id, unit_cost)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+      [invoice.id, l.itemType, l.description, l.membershipId ?? null, l.memberPtPackageId ?? null, l.quantity, l.unitPrice, l.discount, l.taxRate, l.tax, l.amount,
+        l.productId ?? null, l.unitCost ?? null],
     );
   }
   if (total === 0) await activateInvoiceMemberships(c, invoice.id);
@@ -104,8 +124,8 @@ export interface PaymentInput {
  */
 export async function recordPayment(c: PoolClient, req: Request, input: PaymentInput) {
   const invoice = await one(
-    `SELECT i.*, u.full_name AS member_name, u.id AS member_user_id
-       FROM invoices i JOIN members m ON m.id = i.member_id JOIN users u ON u.id = m.user_id
+    `SELECT i.*, COALESCE(u.full_name, i.customer_name) AS member_name, u.id AS member_user_id
+       FROM invoices i LEFT JOIN members m ON m.id = i.member_id LEFT JOIN users u ON u.id = m.user_id
       WHERE i.id = $1 AND i.organization_id = $2 FOR UPDATE OF i`,
     [input.invoiceId, req.auth!.orgId],
     c,
@@ -145,7 +165,7 @@ export async function recordPayment(c: PoolClient, req: Request, input: PaymentI
     summary: `₹${amount.toLocaleString('en-IN')} recorded via ${methodLabel} from ${invoice.member_name} (${invoice.invoice_number})`,
     after: { receipt_number: receipt, amount, method: input.method, reference, invoice_status: status },
   });
-  await notify(c, {
+  if (invoice.member_user_id) await notify(c, {
     orgId: req.auth!.orgId,
     recipientId: invoice.member_user_id,
     audience: 'member',
@@ -155,7 +175,7 @@ export async function recordPayment(c: PoolClient, req: Request, input: PaymentI
     entityType: 'payment',
     entityId: payment.id,
   });
-  if (activated.length) {
+  if (activated.length && invoice.member_user_id) {
     await notify(c, {
       orgId: req.auth!.orgId,
       recipientId: invoice.member_user_id,
@@ -167,6 +187,7 @@ export async function recordPayment(c: PoolClient, req: Request, input: PaymentI
       entityId: activated[0].id,
     });
   }
+  if (invoice.member_id) await onPaymentRecorded(c, req, { ...invoice, amount_paid: paid, status }, payment);
   return { ...payment, invoice_status: status };
 }
 
@@ -215,6 +236,7 @@ export async function voidPayment(c: PoolClient, req: Request, paymentId: string
       [payment.invoice_id],
     );
   }
+  if (payment.member_id) await onPaymentVoided(c, req, payment);
   await audit(c, req, {
     action: 'payment.voided',
     entityType: 'payment',

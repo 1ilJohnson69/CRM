@@ -29,7 +29,7 @@ paymentsRouter.get('/', can('payments.read'), async (req, res) => {
     params.push(v);
     where.push(sql.replaceAll('$?', `$${params.length}`));
   };
-  if (q.search) add(`(u.full_name ILIKE $? OR p.reference ILIKE $? OR p.receipt_number ILIKE $? OR i.invoice_number ILIKE $? OR m.member_code ILIKE $?)`, `%${q.search}%`);
+  if (q.search) add(`(COALESCE(u.full_name, i.customer_name) ILIKE $? OR p.reference ILIKE $? OR p.receipt_number ILIKE $? OR i.invoice_number ILIKE $? OR m.member_code ILIKE $?)`, `%${q.search}%`);
   if (q.method) add(`p.method = $?`, q.method);
   if (q.from) add(`p.paid_at >= $?::date`, q.from);
   if (q.to) add(`p.paid_at < $?::date + 1`, q.to);
@@ -40,7 +40,7 @@ paymentsRouter.get('/', can('payments.read'), async (req, res) => {
 
   const rows = await query(
     `SELECT p.id, p.receipt_number, p.amount, p.method, p.reference, p.paid_at, p.status, p.notes, p.void_reason,
-            p.member_id, u.full_name AS member_name, u.avatar_url, m.member_code,
+            p.member_id, COALESCE(u.full_name, i.customer_name) AS member_name, u.avatar_url, m.member_code, i.source,
             i.id AS invoice_id, i.invoice_number, i.status AS invoice_status,
             (SELECT string_agg(DISTINCT ii.item_type, ',') FROM invoice_items ii WHERE ii.invoice_id = i.id) AS services,
             (SELECT ii.description FROM invoice_items ii WHERE ii.invoice_id = i.id LIMIT 1) AS description,
@@ -49,7 +49,7 @@ paymentsRouter.get('/', can('payments.read'), async (req, res) => {
             sum(p.amount) FILTER (WHERE p.status = 'recorded') OVER() AS total_amount
        FROM payments p
        JOIN invoices i ON i.id = p.invoice_id
-       JOIN members m ON m.id = p.member_id JOIN users u ON u.id = m.user_id
+       LEFT JOIN members m ON m.id = p.member_id LEFT JOIN users u ON u.id = m.user_id
        JOIN branches b ON b.id = p.branch_id
        LEFT JOIN users cu ON cu.id = p.collected_by
       WHERE ${where.join(' AND ')}
@@ -102,7 +102,7 @@ invoicesRouter.get('/', can('invoices.read'), async (req, res) => {
     params.push(v);
     where.push(sql.replaceAll('$?', `$${params.length}`));
   };
-  if (q.search) add(`(u.full_name ILIKE $? OR i.invoice_number ILIKE $? OR m.member_code ILIKE $?)`, `%${q.search}%`);
+  if (q.search) add(`(COALESCE(u.full_name, i.customer_name) ILIKE $? OR i.invoice_number ILIKE $? OR m.member_code ILIKE $?)`, `%${q.search}%`);
   if (q.status === 'outstanding') where.push(`i.status IN ('pending','partially_paid')`);
   else if (q.status) add(`i.status = $?`, q.status);
   if (q.memberId) add(`i.member_id = $?`, q.memberId);
@@ -112,11 +112,12 @@ invoicesRouter.get('/', can('invoices.read'), async (req, res) => {
 
   const rows = await query(
     `SELECT i.id, i.invoice_number, i.issue_date, i.due_date, i.subtotal, i.discount, i.tax, i.total, i.amount_paid,
-            (i.total - i.amount_paid) AS balance, i.status, i.member_id, u.full_name AS member_name, m.member_code,
+            (i.total - i.amount_paid) AS balance, i.status, i.member_id, COALESCE(u.full_name, i.customer_name) AS member_name, m.member_code,
+            i.source, i.amount_refunded, i.points_discount,
             (SELECT ii.description FROM invoice_items ii WHERE ii.invoice_id = i.id LIMIT 1) AS description,
             b.name AS branch_name, count(*) OVER() AS total_count
        FROM invoices i
-       JOIN members m ON m.id = i.member_id JOIN users u ON u.id = m.user_id
+       LEFT JOIN members m ON m.id = i.member_id LEFT JOIN users u ON u.id = m.user_id
        JOIN branches b ON b.id = i.branch_id
       WHERE ${where.join(' AND ')}
       ORDER BY i.issue_date DESC, i.created_at DESC
@@ -167,7 +168,7 @@ export async function loadInvoice(req: Request, id: string, memberId?: string) {
   const invoice = await one(`SELECT * FROM invoices WHERE id = $1 AND organization_id = $2`, [id, auth(req).orgId]);
   if (!invoice) throw notFound('Invoice');
   if (memberId ? invoice.member_id !== memberId : !auth(req).branchIds.includes(invoice.branch_id)) throw notFound('Invoice');
-  const [items, payments, org, branch, member] = await Promise.all([
+  const [items, payments, org, branch, member, refunds] = await Promise.all([
     query(`SELECT * FROM invoice_items WHERE invoice_id = $1 ORDER BY id`, [id]),
     query(
       `SELECT p.*, u.full_name AS collected_by_name FROM payments p LEFT JOIN users u ON u.id = p.collected_by
@@ -176,9 +177,12 @@ export async function loadInvoice(req: Request, id: string, memberId?: string) {
     ),
     one(`SELECT name, legal_name, gstin, currency FROM organizations WHERE id = $1`, [invoice.organization_id]),
     one(`SELECT name, address, phone, email FROM branches WHERE id = $1`, [invoice.branch_id]),
-    one(`SELECT m.id, m.member_code, u.full_name, u.phone, u.email FROM members m JOIN users u ON u.id = m.user_id WHERE m.id = $1`, [invoice.member_id]),
+    invoice.member_id
+      ? one(`SELECT m.id, m.member_code, u.full_name, u.phone, u.email FROM members m JOIN users u ON u.id = m.user_id WHERE m.id = $1`, [invoice.member_id])
+      : Promise.resolve({ id: null, member_code: null, full_name: invoice.customer_name, phone: invoice.customer_phone, email: null, walk_in: true }),
+    query(`SELECT r.*, u.full_name AS refunded_by_name FROM refunds r LEFT JOIN users u ON u.id = r.refunded_by WHERE r.invoice_id = $1 ORDER BY r.created_at`, [id]),
   ]);
-  return { invoice, items, payments, org, branch, member };
+  return { invoice, items, payments, org, branch, member, refunds };
 }
 
 invoicesRouter.get('/:id', can('invoices.read'), async (req, res) => {

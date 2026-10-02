@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Ban, CreditCard, FileDown, Plus, Printer, Receipt, Search } from 'lucide-react';
+import { ArrowLeft, Ban, CreditCard, FileDown, Plus, Printer, Receipt, RotateCcw, Search } from 'lucide-react';
 import { api, ApiError, openPdf, type Paged } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useDebounced, useToast } from '../../lib/ui';
@@ -9,6 +9,7 @@ import { date, dateTime, METHOD_LABEL, money, SERVICE_LABEL } from '../../lib/fo
 import { Alert, Button, Dialog, Empty, Field, Method, Pagination, Person, Skeleton, StatusBadge } from '../../components/ui';
 import { useActions } from '../actions';
 import { MemberPicker, MethodPicker, type MemberPick } from '../shared';
+import { RefundDialog } from '../business/common';
 
 function useListParams() {
   const [params, setParams] = useSearchParams();
@@ -81,7 +82,7 @@ export function PaymentsPage() {
               <tbody>{data.data.map((p) => (
                 <tr key={p.id} className={`clickable ${p.status === 'voided' ? 'void' : ''}`} onClick={() => navigate(`/invoices/${p.invoice_id}`)}>
                   <td style={{ fontWeight: 700 }}>{p.receipt_number}</td>
-                  <td><Person name={p.member_name} detail={p.member_code} size="sm" /></td>
+                  <td><Person name={p.member_name} detail={p.member_code ?? 'Walk-in'} size="sm" /></td>
                   <td className="muted hide-sm">{p.invoice_number}</td>
                   <td className="muted">{(p.services ?? '').split(',').map((s: string) => SERVICE_LABEL[s] ?? s).join(', ')}</td>
                   <td className="r amount">{money(p.amount, true)}</td>
@@ -176,7 +177,7 @@ export function InvoicesPage() {
               <tbody>{data.data.map((i) => (
                 <tr key={i.id} className="clickable" onClick={() => navigate(`/invoices/${i.id}`)}>
                   <td style={{ fontWeight: 700 }}>{i.invoice_number}</td>
-                  <td><Person name={i.member_name} detail={i.member_code} size="sm" /></td>
+                  <td><Person name={i.member_name} detail={i.member_code ?? 'Walk-in'} size="sm" /></td>
                   <td className="muted" style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{i.description}</td>
                   <td className="muted">{date(i.issue_date)}</td>
                   <td className="r amount">{money(i.total, true)}</td>
@@ -200,19 +201,24 @@ export function InvoiceDetail() {
   const { id } = useParams();
   const actions = useActions();
   const { can } = useAuth();
+  const [refunding, setRefunding] = useState(false);
   const { data, error } = useQuery({ queryKey: ['invoice', id], queryFn: () => api.get<any>(`/invoices/${id}`) });
   if (error) return <div className="page"><Empty title="Invoice not found" /></div>;
   if (!data) return <div className="page"><Skeleton h={500} /></div>;
-  const { invoice: inv, items, payments, org, branch, member } = data;
+  const { invoice: inv, items, payments, org, branch, member, refunds = [] } = data;
   const balance = inv.total - inv.amount_paid;
+  const returnable = can('pos.refund') && inv.amount_paid > inv.amount_refunded && items.some((i: any) => i.product_id && i.quantity > i.returned_qty);
   return (
     <div className="page" style={{ maxWidth: 920 }}>
       <div className="row between no-print">
         <Link to="/invoices" className="btn ghost sm"><ArrowLeft />Invoices</Link>
         <div className="row">
           {balance > 0 && can('payments.create') && ['pending', 'partially_paid'].includes(inv.status) && (
-            <Button variant="primary" icon={<CreditCard />} onClick={() => actions.recordPayment({ memberId: member.id, memberName: member.full_name, invoiceId: inv.id })}>Collect {money(balance)}</Button>
+            member.id
+              ? <Button variant="primary" icon={<CreditCard />} onClick={() => actions.recordPayment({ memberId: member.id, memberName: member.full_name, invoiceId: inv.id })}>Collect {money(balance)}</Button>
+              : null
           )}
+          {returnable && <Button icon={<RotateCcw />} onClick={() => setRefunding(true)}>Return items</Button>}
           <Button icon={<Printer />} onClick={() => window.print()}>Print</Button>
           <Button icon={<FileDown />} onClick={() => openPdf(`/invoices/${inv.id}/pdf`)}>PDF</Button>
         </div>
@@ -234,15 +240,15 @@ export function InvoiceDetail() {
         <div className="row between" style={{ marginTop: 28, alignItems: 'flex-start' }}>
           <div>
             <div className="muted" style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em' }}>BILLED TO</div>
-            <Link to={`/members/${member.id}`} style={{ fontWeight: 800, fontSize: 15 }}>{member.full_name}</Link>
-            <div className="muted">{member.member_code} · {member.phone}{member.email ? ` · ${member.email}` : ''}</div>
+            {member.id ? <Link to={`/members/${member.id}`} style={{ fontWeight: 800, fontSize: 15 }}>{member.full_name}</Link> : <div style={{ fontWeight: 800, fontSize: 15 }}>{member.full_name}</div>}
+            <div className="muted">{[member.member_code ?? 'Walk-in customer', member.phone, member.email].filter(Boolean).join(' · ')}</div>
           </div>
           <StatusBadge status={inv.status} label={inv.status === 'pending' ? 'Unpaid' : undefined} />
         </div>
         <table>
           <thead><tr><th>DESCRIPTION</th><th className="r">QTY</th><th className="r">PRICE</th><th className="r">DISCOUNT</th><th className="r">GST</th><th className="r">AMOUNT</th></tr></thead>
           <tbody>{items.map((it: any) => (
-            <tr key={it.id}><td>{it.description}</td><td className="r">{it.quantity}</td><td className="r">{money(it.unit_price, true)}</td><td className="r">{it.discount ? money(it.discount, true) : '—'}</td><td className="r">{money(it.tax, true)}</td><td className="r" style={{ fontWeight: 700 }}>{money(it.amount, true)}</td></tr>
+            <tr key={it.id}><td>{it.description}{it.returned_qty > 0 && <span className="faint"> · {it.returned_qty} returned</span>}</td><td className="r">{it.quantity}</td><td className="r">{money(it.unit_price, true)}</td><td className="r">{it.discount ? money(it.discount, true) : '—'}</td><td className="r">{money(it.tax, true)}</td><td className="r" style={{ fontWeight: 700 }}>{money(it.amount, true)}</td></tr>
           ))}</tbody>
         </table>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
@@ -250,8 +256,10 @@ export function InvoiceDetail() {
             <div className="row between"><span className="muted">Subtotal</span><span>{money(inv.subtotal, true)}</span></div>
             {!!inv.discount && <div className="row between"><span className="muted">Discount</span><span>− {money(inv.discount, true)}</span></div>}
             <div className="row between"><span className="muted">GST</span><span>{money(inv.tax, true)}</span></div>
+            {inv.points_discount > 0 && <div className="row between"><span className="muted">Loyalty ({inv.points_redeemed} pts)</span><span>− {money(inv.points_discount, true)}</span></div>}
             <div className="row between" style={{ fontWeight: 800, fontSize: 16, borderTop: '1px solid #E6DED6', paddingTop: 8 }}><span>Total</span><span>{money(inv.total, true)}</span></div>
             <div className="row between"><span className="muted">Paid</span><span>{money(inv.amount_paid, true)}</span></div>
+            {inv.amount_refunded > 0 && <div className="row between"><span className="muted">Refunded</span><span>− {money(inv.amount_refunded, true)}</span></div>}
             <div className="row between" style={{ fontWeight: 800 }}><span>Balance due</span><span>{money(balance, true)}</span></div>
           </div>
         </div>
@@ -266,11 +274,21 @@ export function InvoiceDetail() {
             ))}</tbody></table>
           </>
         )}
+        {refunds.length > 0 && (
+          <>
+            <div className="muted" style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', marginTop: 28 }}>REFUNDS</div>
+            <table style={{ marginTop: 6 }}><tbody>{refunds.map((r: any) => (
+              <tr key={r.id}><td>{r.refund_number}</td><td className="muted">{dateTime(r.created_at)}</td><td>{METHOD_LABEL[r.method]} · {r.reason}{r.restocked ? ' · restocked' : ''}</td>
+                <td className="muted">by {r.refunded_by_name}</td><td className="r" style={{ fontWeight: 700 }}>− {money(r.amount, true)}</td></tr>
+            ))}</tbody></table>
+          </>
+        )}
         <div className="muted" style={{ marginTop: 32, fontSize: 11.5, textAlign: 'center' }}>Payments are collected at the gym. This is a computer-generated invoice.</div>
       </div>
       {payments.some((p: any) => p.status === 'voided' && p.void_reason) && (
         <Alert tone="info">Voided: {payments.filter((p: any) => p.void_reason).map((p: any) => `${p.receipt_number} — ${p.void_reason}`).join('; ')}</Alert>
       )}
+      {refunding && <RefundDialog sale={{ ...inv, items }} onClose={() => setRefunding(false)} />}
     </div>
   );
 }

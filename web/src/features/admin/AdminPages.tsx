@@ -1,11 +1,13 @@
 import { Fragment, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Building2, KeyRound, Pencil, Plus, Search, ShieldCheck, UserCog } from 'lucide-react';
 import { api, ApiError, type Paged } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { useDebounced, useToast } from '../../lib/ui';
 import { date, dateTime, number, relative } from '../../lib/format';
-import { Alert, Badge, Button, Card, Dialog, Empty, Field, Pagination, Person, Skeleton } from '../../components/ui';
+import { Alert, Badge, Button, Card, Dialog, Empty, Field, Pagination, Person, Skeleton, Tabs } from '../../components/ui';
+import { PerformanceTable } from '../business/EmployeePages';
 import { CredentialsCard } from '../members/MemberForm';
 
 // -------------------------------------------------------------- employees --
@@ -75,6 +77,8 @@ export function EmployeesPage() {
   const [editing, setEditing] = useState<any | null | undefined>(undefined);
   const [reset, setReset] = useState<any>(null);
   const term = useDebounced(search.trim());
+  const [params, setParams] = useSearchParams();
+  const tab = (params.get('tab') as 'directory' | 'performance') ?? 'directory';
   const { data } = useQuery({ queryKey: ['staff', term, page], queryFn: () => api.get<Paged<any>>('/admin/staff', { search: term, page }), placeholderData: keepPreviousData });
   const resetPw = useMutation({
     mutationFn: (id: string) => api.post<any>(`/admin/staff/${id}/reset-password`),
@@ -84,10 +88,11 @@ export function EmployeesPage() {
   return (
     <div className="page">
       <div className="page-head">
-        <div><h1>Employees</h1><div className="sub">Staff accounts, roles and branch assignments.</div></div>
+        <div><h1>Employees</h1><div className="sub">Staff accounts, roles, branches, shifts, performance and pay.</div></div>
         <div className="actions">{can('staff.manage') && <Button variant="primary" icon={<Plus />} onClick={() => setEditing(null)}>Add employee</Button>}</div>
       </div>
-      <section className="card">
+      <Tabs value={tab} onChange={(t) => setParams(t === 'directory' ? {} : { tab: t })} tabs={[{ key: 'directory', label: 'Directory' }, { key: 'performance', label: 'Performance' }]} />
+      {tab === 'performance' ? <PerformanceTable /> : <section className="card">
         <div className="toolbar"><div className="search-box"><Search /><input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} placeholder="Name, email or phone" /></div></div>
         <div className="table-wrap">
           {!data ? <div style={{ padding: 20 }}><Skeleton h={300} /></div> : !data.data.length ? <Empty icon={<UserCog size={20} />} title="No employees" /> : (
@@ -95,7 +100,7 @@ export function EmployeesPage() {
               <thead><tr><th>Employee</th><th>Role</th><th>Branches</th><th className="hide-sm">Phone</th><th className="hide-sm">Joined</th><th>Last sign-in</th><th>Status</th>{can('staff.manage') && <th />}</tr></thead>
               <tbody>{data.data.map((s) => (
                 <tr key={s.id}>
-                  <td><Person name={s.full_name} detail={s.designation ?? s.email} /></td>
+                  <td><Link to={`/admin/employees/${s.id}`}><Person name={s.full_name} detail={s.designation ?? s.email} /></Link></td>
                   <td>{s.role_name}</td>
                   <td className="muted">{s.all_branches ? 'All branches' : s.branches.map((b: any) => b.name).join(', ')}</td>
                   <td className="muted num hide-sm">{s.phone}</td>
@@ -112,7 +117,7 @@ export function EmployeesPage() {
           )}
         </div>
         {data && data.pagination.total > 0 && <Pagination {...data.pagination} onPage={setPage} />}
-      </section>
+      </section>}
       {editing !== undefined && <EmployeeDialog employee={editing ?? undefined} onClose={() => setEditing(undefined)} />}
       {reset && <Dialog open onClose={() => setReset(null)} title="Password reset" footer={<Button variant="primary" onClick={() => setReset(null)}>Done</Button>}><CredentialsCard login={reset.login} password={reset.temporaryPassword} /></Dialog>}
     </div>

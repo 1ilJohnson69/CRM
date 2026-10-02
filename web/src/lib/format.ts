@@ -11,10 +11,11 @@ export const money = (n: number | null | undefined, exact = false) => {
 export function moneyShort(n: number | null | undefined) {
   const v = Number(n ?? 0);
   const abs = Math.abs(v);
-  if (abs >= 1e7) return `₹${(v / 1e7).toFixed(2)}Cr`;
-  if (abs >= 1e5) return `₹${(v / 1e5).toFixed(2)}L`;
-  if (abs >= 1e3) return `₹${(v / 1e3).toFixed(1)}K`;
-  return `₹${Math.round(v)}`;
+  const sign = v < 0 ? '−' : '';
+  if (abs >= 1e7) return `${sign}₹${(abs / 1e7).toFixed(2)}Cr`;
+  if (abs >= 1e5) return `${sign}₹${(abs / 1e5).toFixed(2)}L`;
+  if (abs >= 1e3) return `${sign}₹${(abs / 1e3).toFixed(1)}K`;
+  return `${sign}₹${Math.round(abs)}`;
 }
 
 export const number = (n: number | null | undefined) => new Intl.NumberFormat('en-IN').format(Number(n ?? 0));

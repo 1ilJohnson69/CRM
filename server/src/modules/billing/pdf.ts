@@ -10,8 +10,8 @@ const money = (n: number) => `Rs. ${Number(n).toLocaleString('en-IN', { minimumF
 const date = (d: string) =>
   new Date(d.length === 10 ? `${d}T00:00:00Z` : d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' });
 
-export function streamInvoicePdf(res: Response, data: { invoice: any; items: any[]; payments: any[]; org: any; branch: any; member: any }) {
-  const { invoice, items, payments, org, branch, member } = data;
+export function streamInvoicePdf(res: Response, data: { invoice: any; items: any[]; payments: any[]; org: any; branch: any; member: any; refunds?: any[] }) {
+  const { invoice, items, payments, org, branch, member, refunds = [] } = data;
   const doc = new PDFDocument({ size: 'A4', margin: 48 });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `inline; filename="${invoice.invoice_number}.pdf"`);
@@ -63,8 +63,10 @@ export function streamInvoicePdf(res: Response, data: { invoice: any; items: any
   row('Subtotal', money(invoice.subtotal));
   if (invoice.discount) row('Discount', `- ${money(invoice.discount)}`);
   if (invoice.tax) row('Tax (GST)', money(invoice.tax));
+  if (invoice.points_discount) row(`Loyalty (${invoice.points_redeemed} pts)`, `- ${money(invoice.points_discount)}`);
   row('Total', money(invoice.total), true);
   row('Paid', money(invoice.amount_paid));
+  if (invoice.amount_refunded) row('Refunded', `- ${money(invoice.amount_refunded)}`);
   row('Balance due', money(invoice.total - invoice.amount_paid), true);
 
   if (payments.length) {
@@ -76,6 +78,18 @@ export function streamInvoicePdf(res: Response, data: { invoice: any; items: any
       const method = p.method === 'bank_transfer' ? 'Bank transfer' : p.method.toUpperCase();
       doc.text(`${date(p.paid_at)}  ·  ${p.receipt_number}  ·  ${method}${p.reference ? ` (${p.reference})` : ''}`, 48, y, { width: 380 });
       doc.text(money(p.amount), 460, y, { width: 87, align: 'right' });
+      y += 15;
+    }
+  }
+
+  if (refunds.length) {
+    y += 12;
+    doc.font('Helvetica-Bold').fontSize(8).fillColor(MUTED).text('REFUNDS', 48, y);
+    y += 14;
+    doc.font('Helvetica').fontSize(9).fillColor(INK);
+    for (const r of refunds) {
+      doc.text(`${date(r.created_at)}  ·  ${r.refund_number}  ·  ${r.reason}`, 48, y, { width: 380 });
+      doc.text(`- ${money(r.amount)}`, 460, y, { width: 87, align: 'right' });
       y += 15;
     }
   }

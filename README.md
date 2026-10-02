@@ -15,7 +15,7 @@ member's app) updates in the same database transaction.
      web/ (Admin CRM)      /api/me (Member App)
 ```
 
-## Status: Phases 1–4 (Core, CRM, Gym operations, Fitness) — complete
+## Status: Phases 1–5 (Core, CRM, Gym operations, Fitness, Business) — complete
 
 | Module | Backend | CRM UI |
 |---|---|---|
@@ -75,8 +75,21 @@ member's app) updates in the same database transaction.
 | Member profile | Fitness, Workout and Nutrition tabs (`?tab=` deep links). A fitness profile records goal, level, diet, injuries and the assigned trainer and nutritionist |
 | Automation | The trainer is notified 3 days before a member's plan ends, once per plan. Members are notified when their plan is assigned or updated. Members with no assessment within the gym's re-test interval (`assessment_interval_days`, default 60) appear in the "due" list |
 
-Phases 5–6 (POS, inventory, marketing…) appear in the sidebar
-marked `P5`–`P6` so the full product map is visible.
+### Phase 5 — Business
+
+| Module | What it does |
+|---|---|
+| POS | Product grid with barcode/SKU scan-to-add, members or walk-in customers, live stock per branch, split payments (up to 3 tenders), cash change, member "on account" balances, loyalty redemption, printable receipt. A sale is a normal invoice + payments, so revenue, receipts, the member's purchase history and the member app all update |
+| Returns | Return product lines from a sale (from the till or the invoice): refund is the units' share of what was actually paid (after GST and points), optional restock, purchase points reversed, member notified. Dashboard revenue and P&L are net of refunds |
+| Inventory | Products (SKU, barcode, category, cost/price, GST, supplier, low-stock alert), stock per branch, suppliers. Every change goes through one ledger: received, sold, returned, counted, damaged, stock out, transfers between branches. Stock can't go negative; staff are alerted the first time an item falls to its threshold. Receiving stock can book the purchase as an Inventory expense in the same step. Insights: category margin, best sellers, slow movers |
+| Expenses | Configurable categories (Rent, Utilities, Salaries, Maintenance, Marketing, Equipment, Inventory, Other + custom), vendor, method/reference, branch, receipt upload (JPEG/PNG/WebP/PDF, magic-byte checked, private storage), void with reason. Cash-basis profit & loss by month with category breakdown and shop gross margin |
+| Employees | Profile page per employee: role, branches, HR details, monthly performance computed from what they already do (collections, new sales, renewals, shop sales, leads won, follow-ups, PT sessions, classes, attendees, assessments, shifts and hours) with 6-month trends; team performance table. Salary details and payouts need `staff.salary`; a payout is a Salaries expense tied to the employee and month (one per month) |
+| Loyalty | Configurable rules: points per ₹100 paid, renewal bonus, referral rewards, visit milestones, events and challenges (manual awards), point value, minimum and max-% redemption. Points are an append-only ledger, idempotent per source, reversed when a payment is voided or refunded |
+| Referrals | Member A refers B (CRM, lead form or member app) → B becomes a lead in the pipeline → B converts → verified on B's first fully paid membership → reward points to A and a welcome bonus to B (automatic or manual). Each member has a referral code; top referrers and conversion are tracked |
+| Member app | `/me/loyalty` (balance, value, next milestone, rules, history), `/me/referrals` (code, friends' progress — no contact details), refer a friend |
+
+Phase 6 (marketing, events, integrations) appears in the sidebar
+marked `P6` so the full product map is visible.
 They are not wired to fake data.
 
 Sending through a provider (WhatsApp Business API, SMS gateway, email) is
@@ -168,6 +181,15 @@ GET /fitness/members/:id/summary   PUT /fitness/members/:id/profile
 GET/POST /fitness/assessments   PUT /fitness/assessments/:id
 POST /fitness/members/:id/photos?angle=  (raw image body)   GET/DELETE /fitness/photos/:id
 
+GET /pos/catalog   POST /pos/sales   GET /pos/sales|summary   POST /pos/sales/:id/refund
+GET/POST /inventory/products   GET/PUT /inventory/products/:id   GET/POST /inventory/movements
+GET /inventory/summary   GET/POST /inventory/suppliers   PUT /inventory/suppliers/:id
+GET/POST /expenses   POST /expenses/:id/void   GET/POST /expenses/:id/receipt (raw body)
+GET/POST /expenses/categories   PUT /expenses/categories/:id   GET /expenses/pnl?months=
+GET /employees/performance?month=   GET /employees/:id   PUT /employees/:id/hr   POST /employees/:id/salary
+GET/PUT /loyalty/settings   GET /loyalty/summary|transactions   GET /loyalty/members/:id   POST /loyalty/award
+GET/POST /referrals   GET /referrals/summary   POST /referrals/:id/verify|reward|reject
+
 GET /search?q=         GET /notifications      POST /notifications/read
 GET /access/check?code=
 
@@ -178,6 +200,7 @@ GET/PUT /admin/organization                   GET /admin/audit-logs
 GET /me   GET /me/memberships|payments|invoices|notifications|attendance|classes|pt|appointments|checkin-code
 GET /me/invoices/:id/pdf   POST /me/classes/:sessionId/book   POST /me/bookings/:id/cancel
 GET /me/workout|nutrition|progress   POST /me/workout-logs   POST /me/photos   GET /me/photos/:id
+GET /me/loyalty   GET/POST /me/referrals
 ```
 
 ## Layout

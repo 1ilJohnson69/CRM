@@ -6,6 +6,7 @@ import { addToDate, round2, today } from '../lib/http.js';
 import { seedCrm } from './seed-crm.js';
 import { seedOps } from './seed-ops.js';
 import { seedFitness } from './seed-fitness.js';
+import { seedBusiness } from './seed-business.js';
 
 // Deterministic PRNG so every seed produces the same demo data.
 let s = 20261002;
@@ -30,6 +31,7 @@ async function main() {
     await seedCrm();
     await seedOps();
     await seedFitness();
+    await seedBusiness();
     console.log('Core data already present.');
     return;
   }
@@ -266,6 +268,7 @@ async function main() {
   await seedCrm();
   await seedOps();
   await seedFitness();
+  await seedBusiness();
 }
 
 main()

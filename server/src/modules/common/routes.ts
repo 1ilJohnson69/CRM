@@ -26,8 +26,8 @@ commonRouter.get('/search', requireStaff, async (req, res) => {
       : [],
     has('invoices.read')
       ? query(
-          `SELECT i.id, i.invoice_number AS title, concat_ws(' · ', u.full_name, '₹' || i.total) AS subtitle, i.status
-             FROM invoices i JOIN members m ON m.id = i.member_id JOIN users u ON u.id = m.user_id
+          `SELECT i.id, i.invoice_number AS title, concat_ws(' · ', COALESCE(u.full_name, i.customer_name), '₹' || i.total) AS subtitle, i.status
+             FROM invoices i LEFT JOIN members m ON m.id = i.member_id LEFT JOIN users u ON u.id = m.user_id
             WHERE i.organization_id = $1 AND i.branch_id = ANY($2) AND i.invoice_number ILIKE $3
             ORDER BY i.created_at DESC LIMIT 4`,
           [ctx.orgId, ctx.branchIds, like],
@@ -35,8 +35,8 @@ commonRouter.get('/search', requireStaff, async (req, res) => {
       : [],
     has('payments.read')
       ? query(
-          `SELECT p.id, p.invoice_id, p.receipt_number AS title, concat_ws(' · ', u.full_name, upper(p.method), p.reference) AS subtitle, p.status
-             FROM payments p JOIN members m ON m.id = p.member_id JOIN users u ON u.id = m.user_id
+          `SELECT p.id, p.invoice_id, p.receipt_number AS title, concat_ws(' · ', COALESCE(u.full_name, i.customer_name), upper(p.method), p.reference) AS subtitle, p.status
+             FROM payments p JOIN invoices i ON i.id = p.invoice_id LEFT JOIN members m ON m.id = p.member_id LEFT JOIN users u ON u.id = m.user_id
             WHERE p.organization_id = $1 AND p.branch_id = ANY($2) AND (p.reference ILIKE $3 OR p.receipt_number ILIKE $3)
             ORDER BY p.paid_at DESC LIMIT 4`,
           [ctx.orgId, ctx.branchIds, like],

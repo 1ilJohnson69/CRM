@@ -8,6 +8,7 @@ import { badRequest } from '../../lib/errors.js';
 import { isoDate, uuid } from '../../lib/http.js';
 import { nextSequence, PAYMENT_METHODS } from '../billing/service.js';
 import { sellMembership } from '../memberships/service.js';
+import { createReferral } from '../engagement/loyalty.js';
 
 export const profileFields = {
   fullName: z.string().trim().min(2),
@@ -32,6 +33,7 @@ export const memberCreateSchema = z.object({
   branchId: uuid,
   joinDate: isoDate.optional(),
   issueAppAccess: z.boolean().default(true),
+  referredByMemberId: uuid.optional().nullable(),
   membership: z
     .object({
       planId: uuid,
@@ -85,6 +87,12 @@ export async function createMember(c: PoolClient, req: Request, body: MemberCrea
     summary: `New member ${body.fullName} (${memberCode}) registered`,
     after: { member_code: memberCode, phone: body.phone, email: body.email, app_access: body.issueAppAccess },
   });
+  if (body.referredByMemberId) {
+    const referrer = await one(`SELECT id FROM members WHERE id = $1 AND organization_id = $2`, [body.referredByMemberId, orgId], c);
+    if (!referrer) throw badRequest('Unknown referring member');
+    // Before the sale, so paying for the first membership verifies the referral.
+    await createReferral(c, req, { referrerMemberId: referrer.id, branchId: body.branchId, name: body.fullName, phone: body.phone, referredMemberId: member.id, source: 'member' });
+  }
   let sale = null;
   if (body.membership) sale = await sellMembership(c, req, member.id, { ...body.membership, kind: 'new' });
   return {

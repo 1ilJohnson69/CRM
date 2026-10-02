@@ -30,17 +30,20 @@ dashboardRouter.get('/summary', can('dashboard.view'), async (req, res) => {
       `SELECT COALESCE(sum(amount) FILTER (WHERE paid_at >= current_date - 29), 0) AS last_30,
               COALESCE(sum(amount) FILTER (WHERE paid_at < current_date - 29), 0) AS prior_30,
               COALESCE(sum(amount) FILTER (WHERE paid_at >= current_date), 0) AS today,
-              count(*) FILTER (WHERE paid_at >= current_date) AS today_count
-         FROM payments WHERE organization_id = $1 AND branch_id = ANY($2) AND status = 'recorded'
-          AND paid_at >= current_date - 59`,
+              count(*) FILTER (WHERE paid_at >= current_date AND amount > 0) AS today_count
+         FROM (SELECT paid_at, amount FROM payments WHERE organization_id = $1 AND branch_id = ANY($2) AND status = 'recorded' AND paid_at >= current_date - 59
+               UNION ALL
+               -- Refunds net off revenue on the day they're given.
+               SELECT created_at, -amount FROM refunds WHERE organization_id = $1 AND branch_id = ANY($2) AND created_at >= current_date - 59) x`,
       scope,
     ),
     query(
-      `SELECT d::date AS date, COALESCE(sum(p.amount), 0) AS value
-         FROM generate_series(current_date - 29, current_date, interval '1 day') d
-         LEFT JOIN payments p ON p.paid_at >= d AND p.paid_at < d + interval '1 day'
-               AND p.organization_id = $1 AND p.branch_id = ANY($2) AND p.status = 'recorded'
-        GROUP BY d ORDER BY d`,
+      `SELECT d::date AS date,
+              COALESCE((SELECT sum(p.amount) FROM payments p WHERE p.paid_at >= d AND p.paid_at < d + interval '1 day'
+                         AND p.organization_id = $1 AND p.branch_id = ANY($2) AND p.status = 'recorded'), 0)
+            - COALESCE((SELECT sum(r.amount) FROM refunds r WHERE r.created_at >= d AND r.created_at < d + interval '1 day'
+                         AND r.organization_id = $1 AND r.branch_id = ANY($2)), 0) AS value
+         FROM generate_series(current_date - 29, current_date, interval '1 day') d ORDER BY d`,
       scope,
     ),
     one(
@@ -144,13 +147,15 @@ dashboardRouter.get('/revenue', can('dashboard.view'), async (req, res) => {
 
   // Payments are split across an invoice's line items in proportion to each
   // line's share of the invoice total, so mixed invoices attribute correctly.
-  const allocated = `
-    SELECT p.paid_at, ii.item_type, p.amount * (ii.amount / NULLIF(i.total, 0)) AS amount
+  const allocated = `SELECT * FROM (
+    SELECT p.paid_at, ii.item_type, p.amount * (ii.amount / NULLIF((SELECT sum(x.amount) FROM invoice_items x WHERE x.invoice_id = i.id), 0)) AS amount
       FROM payments p JOIN invoices i ON i.id = p.invoice_id JOIN invoice_items ii ON ii.invoice_id = i.id
-     WHERE p.organization_id = $1 AND p.branch_id = ANY($2) AND p.status = 'recorded'`;
+     WHERE p.organization_id = $1 AND p.branch_id = ANY($2) AND p.status = 'recorded'
+     UNION ALL
+    SELECT r.created_at, 'product', -r.amount FROM refunds r WHERE r.organization_id = $1 AND r.branch_id = ANY($2)) z WHERE true`;
 
   const series = await query(
-    `WITH a AS (${allocated} AND p.paid_at >= date_trunc('${bucket}', current_date - ($3::int - 1)))
+    `WITH a AS (${allocated} AND z.paid_at >= date_trunc('${bucket}', current_date - ($3::int - 1)))
      SELECT b::date AS date,
             COALESCE(sum(a.amount) FILTER (WHERE a.item_type = 'membership'), 0) AS membership,
             COALESCE(sum(a.amount) FILTER (WHERE a.item_type = 'pt'), 0) AS pt,
@@ -163,7 +168,7 @@ dashboardRouter.get('/revenue', can('dashboard.view'), async (req, res) => {
     scope,
   );
   const previous = await one(
-    `WITH a AS (${allocated} AND p.paid_at >= current_date - ($3::int * 2 - 1) AND p.paid_at < current_date - ($3::int - 1))
+    `WITH a AS (${allocated} AND z.paid_at >= current_date - ($3::int * 2 - 1) AND z.paid_at < current_date - ($3::int - 1))
      SELECT COALESCE(sum(amount), 0) AS total FROM a`,
     scope,
   );

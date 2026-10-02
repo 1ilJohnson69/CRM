@@ -28,6 +28,11 @@ import { PtPage } from './features/ops/PtPage';
 import { AssessmentsPage, NutritionPage, WorkoutsPage } from './features/fitness/FitnessPages';
 import { WorkoutEditor } from './features/fitness/WorkoutEditor';
 import { NutritionEditor } from './features/fitness/NutritionEditor';
+import { PosPage } from './features/business/PosPage';
+import { InventoryPage } from './features/business/InventoryPage';
+import { ExpensesPage } from './features/business/ExpensesPage';
+import { LoyaltyPage, ReferralsPage } from './features/business/EngagementPages';
+import { EmployeeDetail } from './features/business/EmployeePages';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -71,11 +76,17 @@ function App() {
         <Route path="nutrition" element={<Guard perm="nutrition.read"><NutritionPage /></Guard>} />
         <Route path="nutrition/plans/:id" element={<Guard perm="nutrition.read"><NutritionEditor /></Guard>} />
         <Route path="assessments" element={<Guard perm="assessments.read"><AssessmentsPage /></Guard>} />
+        <Route path="pos" element={<Guard perm="pos.sell"><PosPage /></Guard>} />
+        <Route path="inventory" element={<Guard perm="inventory.read"><InventoryPage /></Guard>} />
+        <Route path="expenses" element={<Guard perm="expenses.read"><ExpensesPage /></Guard>} />
+        <Route path="loyalty" element={<Guard perm="members.read"><LoyaltyPage /></Guard>} />
+        <Route path="referrals" element={<Guard perm="members.read"><ReferralsPage /></Guard>} />
         <Route path="memberships" element={<Guard perm="plans.read"><MembershipsPage /></Guard>} />
         <Route path="payments" element={<Guard perm="payments.read"><PaymentsPage /></Guard>} />
         <Route path="invoices" element={<Guard perm="invoices.read"><InvoicesPage /></Guard>} />
         <Route path="invoices/:id" element={<Guard perm="invoices.read"><InvoiceDetail /></Guard>} />
         <Route path="admin/employees" element={<Guard perm="staff.read"><EmployeesPage /></Guard>} />
+        <Route path="admin/employees/:id" element={<Guard perm="staff.read"><EmployeeDetail /></Guard>} />
         <Route path="admin/branches" element={<BranchesPage />} />
         <Route path="admin/roles" element={<Guard perm="roles.manage"><RolesPage /></Guard>} />
         <Route path="admin/settings" element={<Guard perm="settings.manage"><SettingsPage /></Guard>} />
